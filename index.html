@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dutch Dictation Flow</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>Dutch Dictation Flow</h1>
+      <p>基于 GitHub Pages 的原生静态应用：按文章管理句子、上传句子音频、听写复习与备份存储。</p>
+    </div>
+    <nav class="page-nav">
+      <button class="btn btn-secondary nav-btn active" data-page="list">文章管理</button>
+      <button class="btn btn-secondary nav-btn" data-page="backup">数据备份</button>
+    </nav>
+  </header>
+
+  <main class="app-shell">
+    <section class="card" id="article-creator">
+      <h2>创建文章与上传音频</h2>
+      <form id="article-form">
+        <div class="field-row">
+          <label>文章标题</label>
+          <input type="text" id="article-title" placeholder="例如：荷兰日常对话" required />
+        </div>
+        <div class="field-row">
+          <label>来源 / 来源链接</label>
+          <input type="text" id="article-source" placeholder="例如：课堂录音、教材、Podcast" />
+        </div>
+        <div class="field-row">
+          <label>文章标签（逗号分隔）</label>
+          <input type="text" id="article-tags" placeholder="例如：日常, 动词, B1" />
+        </div>
+        <button type="submit" class="btn btn-primary">创建文章</button>
+      </form>
+      <p class="help-text">创建文章后，请在句子编辑区逐句上传对应音频，音频文件保存在浏览器 IndexedDB 中。</p>
+    </section>
+
+    <section class="card" id="article-list">
+      <h2>文章列表</h2>
+      <div id="articles"></div>
+      <p id="empty-list" class="empty-state">当前还没有文章。请先创建一篇文章。</p>
+    </section>
+
+    <section class="card hidden" id="article-detail">
+      <div class="detail-header">
+        <div>
+          <h2 id="detail-title"></h2>
+          <p id="detail-meta"></p>
+        </div>
+        <div>
+          <button id="back-to-list" class="btn btn-secondary">返回文章列表</button>
+        </div>
+      </div>
+
+      <div class="detail-summary">
+        <div>文章熟练度：<strong id="detail-mastery">0%</strong></div>
+        <div>复习次数：<strong id="detail-review-count">0</strong></div>
+      </div>
+
+      <div class="sentence-panel">
+        <h3>添加或编辑句子</h3>
+        <form id="sentence-form" class="sentence-form">
+          <div class="field-row">
+            <label>句子文本（荷兰语）</label>
+            <textarea id="sentence-text" rows="2" placeholder="例如：Ik ga naar school." required></textarea>
+          </div>
+          <div class="field-row">
+            <label>中文翻译</label>
+            <textarea id="sentence-translation" rows="2" placeholder="例如：我去学校。"></textarea>
+          </div>
+          <div class="field-row">
+            <label>上传句子音频</label>
+            <input type="file" id="sentence-audio" accept="audio/*" />
+          </div>
+          <div class="field-row two-column">
+            <div>
+              <label>难度标签</label>
+              <input type="text" id="sentence-difficulty" placeholder="例如：A1, 词组, 重点" />
+            </div>
+            <div>
+              <label>句子标签</label>
+              <input type="text" id="sentence-tags" placeholder="例如：问候, 时间, 事实" />
+            </div>
+          </div>
+          <div class="sentence-actions">
+            <button type="submit" class="btn btn-primary">保存句子</button>
+            <button type="button" id="sentence-reset" class="btn btn-secondary">重置表单</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="sentence-list">
+        <h3>句子列表</h3>
+        <div id="sentences"></div>
+      </div>
+
+      <div class="review-actions">
+        <button id="start-review" class="btn btn-primary">开始复习这篇文章</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="backup-panel">
+      <h2>数据备份与存储说明</h2>
+      <p>文章与句子数据会保存在本地浏览器的 <strong>localStorage</strong> 中，句子音频文件保存在浏览器的 <strong>IndexedDB</strong> 中。刷新、关闭浏览器后数据仍会保留，但如果浏览器缓存被清除或换设备，数据会丢失。</p>
+      <div class="field-row">
+        <button id="backup-export" class="btn btn-primary">导出备份 JSON</button>
+      </div>
+      <div class="field-row">
+        <label>导入备份 JSON</label>
+        <input id="backup-import" type="file" accept=".json" />
+      </div>
+      <p id="backup-status" class="help-text"></p>
+    </section>
+
+    <section class="card hidden" id="review-panel">
+      <div class="detail-header">
+        <div>
+          <h2 id="review-title">听写复习</h2>
+          <p id="review-subtitle"></p>
+        </div>
+        <div>
+          <button id="end-review" class="btn btn-secondary">结束复习</button>
+        </div>
+      </div>
+
+      <div class="review-status">
+        <div>句子 <span id="quiz-index">0</span> / <span id="quiz-total">0</span></div>
+        <div>当前熟练度：<strong id="quiz-mastery">0%</strong></div>
+      </div>
+
+      <div class="review-card">
+        <div class="sentence-card">
+          <div class="sentence-meta">
+            <span id="sentence-number"></span>
+            <span id="sentence-difficulty"></span>
+            <span id="sentence-tags"></span>
+          </div>
+          <div class="sentence-controls">
+            <button id="play-sentence" class="btn btn-primary">播放句子音频</button>
+            <button id="show-answer" class="btn btn-secondary">显示正确文本</button>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <label>输入你的听写结果</label>
+          <textarea id="dictation-input" rows="3" placeholder="听写后在这里输入荷兰语句子"></textarea>
+        </div>
+
+        <div class="sentence-actions">
+          <button id="submit-answer" class="btn btn-primary">提交答案</button>
+          <button id="next-sentence" class="btn btn-secondary">下一句</button>
+        </div>
+
+        <div id="feedback" class="feedback hidden"></div>
+      </div>
+    </section>
+  </main>
+
+  <template id="sentence-row-template">
+    <div class="sentence-row">
+      <div class="sentence-main">
+        <div class="sentence-text"></div>
+        <div class="sentence-translation"></div>
+        <div class="sentence-meta-line"></div>
+      </div>
+      <div class="sentence-actions-row">
+        <button class="btn btn-small btn-primary play-sentence-btn">播放</button>
+        <button class="btn btn-small btn-secondary review-sentence-btn">复习</button>
+        <button class="btn btn-small btn-secondary edit-sentence-btn">编辑</button>
+        <button class="btn btn-small btn-secondary move-up-sentence-btn">上移</button>
+        <button class="btn btn-small btn-secondary move-down-sentence-btn">下移</button>
+      </div>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
