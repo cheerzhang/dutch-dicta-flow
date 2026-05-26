@@ -213,13 +213,58 @@ function renderArticleList() {
         <div class="sentence-actions">
           <button class="btn btn-primary" data-action="open" data-id="${article.id}">查看</button>
           <button class="btn btn-secondary" data-action="review" data-id="${article.id}">复习</button>
+          <button class="btn btn-secondary" data-action="delete" data-id="${article.id}">删除</button>
         </div>
       </div>
     `;
     articleCard.querySelector('[data-action="open"]').addEventListener('click', () => openArticleDetail(article.id));
     articleCard.querySelector('[data-action="review"]').addEventListener('click', () => startReview(article.id));
+    articleCard.querySelector('[data-action="delete"]').addEventListener('click', () => deleteArticle(article.id));
     elements.articles.appendChild(articleCard);
   });
+}
+
+async function deleteAudio(audioId) {
+  if (!audioId || !db) return;
+  try {
+    const transaction = db.transaction(DB_STORE, 'readwrite');
+    const store = transaction.objectStore(DB_STORE);
+    store.delete(audioId);
+    if (audioBlobCache.has(audioId)) {
+      const url = audioBlobCache.get(audioId);
+      try { URL.revokeObjectURL(url); } catch (e) {}
+      audioBlobCache.delete(audioId);
+    }
+    return new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } catch (e) {
+    return Promise.resolve();
+  }
+}
+
+async function deleteArticle(articleId) {
+  const idx = articles.findIndex(a => a.id === articleId);
+  if (idx === -1) return;
+  const ok = confirm('确定要删除该文章及其所有句子音频吗？此操作不可撤销。');
+  if (!ok) return;
+  const article = articles[idx];
+  // delete associated audio blobs
+  const audioDeletes = [];
+  (article.sentences || []).forEach(s => {
+    if (s.audioId) audioDeletes.push(deleteAudio(s.audioId));
+  });
+  await Promise.all(audioDeletes);
+  // remove article
+  articles.splice(idx, 1);
+  saveArticles();
+  renderArticleList();
+  // if currently selected, go back to list
+  if (selectedArticleId === articleId) {
+    selectedArticleId = null;
+    showSection('list');
+  }
 }
 
 async function openArticleDetail(articleId) {
