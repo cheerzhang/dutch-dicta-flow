@@ -41,10 +41,14 @@ body {
 }
 
 .page-nav {
-  margin-top: 18px;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  display: grid;
+  gap: 12px;
+}
+
+.page-nav .nav-btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .page-nav .nav-btn.active {
@@ -56,9 +60,37 @@ body {
   margin-top: 8px;
 }
 
-.app-shell {
+.app-container {
   width: min(1200px, calc(100% - 40px));
   margin: 0 auto 40px;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.sidebar {
+  position: sticky;
+  top: 20px;
+  align-self: start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+
+.sidebar-brand h2 {
+  margin: 0 0 10px;
+  font-size: 1.1rem;
+}
+
+.sidebar-brand p {
+  margin: 0 0 18px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.app-content {
   display: grid;
   gap: 18px;
 }
@@ -251,8 +283,27 @@ body {
   background: #fef2f2;
 }
 
+@media (max-width: 1000px) {
+  .app-container {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: relative;
+    top: 0;
+  }
+}
+
 @media (max-width: 780px) {
   .field-row.two-column {
     grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    padding: 18px;
+  }
+
+  .page-nav .nav-btn {
+    font-size: 0.95rem;
   }
 }

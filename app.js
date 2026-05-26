@@ -37,6 +37,11 @@ const elements = {
   pageNavButtons: document.querySelectorAll('.page-nav .nav-btn'),
   startReview: document.getElementById('start-review'),
   reviewPanel: document.getElementById('review-panel'),
+  reportPanel: document.getElementById('report-panel'),
+  reportTotalArticles: document.getElementById('report-total-articles'),
+  reportTotalSentences: document.getElementById('report-total-sentences'),
+  reportOverallMastery: document.getElementById('report-overall-mastery'),
+  reportRecent: document.getElementById('report-recent'),
   reviewTitle: document.getElementById('review-title'),
   reviewSubtitle: document.getElementById('review-subtitle'),
   quizIndex: document.getElementById('quiz-index'),
@@ -74,21 +79,23 @@ function bindEvents() {
   elements.showAnswer.addEventListener('click', revealSentenceAnswer);
   elements.submitAnswer.addEventListener('click', handleSubmitAnswer);
   elements.nextSentence.addEventListener('click', showNextSentence);
-  elements.endReview.addEventListener('click', () => showSection('detail'));
+  elements.endReview.addEventListener('click', () => showSection('edit'));
   elements.backupExport.addEventListener('click', exportBackup);
   elements.backupImport.addEventListener('change', handleBackupImport);
   elements.pageNavButtons.forEach(btn => btn.addEventListener('click', handlePageNav));
 }
 
 function showSection(mode) {
-  elements.articleDetail.classList.toggle('hidden', mode !== 'detail');
+  elements.articleDetail.classList.toggle('hidden', mode !== 'edit');
   elements.reviewPanel.classList.toggle('hidden', mode !== 'review');
   elements.backupPanel.classList.toggle('hidden', mode !== 'backup');
+  elements.reportPanel.classList.toggle('hidden', mode !== 'report');
   document.getElementById('article-list').classList.toggle('hidden', mode !== 'list');
   setActiveNav(mode);
   if (mode === 'list') {
     selectedArticleId = null;
   }
+  if (mode === 'report') showReport();
 }
 
 function setActiveNav(mode) {
@@ -103,6 +110,22 @@ function handlePageNav(event) {
     showSection('list');
   } else if (page === 'backup') {
     showSection('backup');
+  } else if (page === 'edit') {
+    if (!selectedArticleId) {
+      alert('请先在文章列表选择一篇文章以进入编辑页面。');
+      showSection('list');
+      return;
+    }
+    openArticleDetail(selectedArticleId);
+  } else if (page === 'review') {
+    if (!selectedArticleId) {
+      alert('请先在文章列表选择一篇文章以进入复习页面。');
+      showSection('list');
+      return;
+    }
+    startReview(selectedArticleId);
+  } else if (page === 'report') {
+    showSection('report');
   }
 }
 
@@ -212,7 +235,7 @@ async function openArticleDetail(articleId) {
   elements.sentenceForm.dataset.editingId = '';
   resetSentenceForm();
   renderSentenceList(article);
-  showSection('detail');
+  showSection('edit');
 }
 
 function renderSentenceList(article) {
@@ -616,6 +639,38 @@ function calculateArticleMastery(article) {
   if (!article.sentences.length) return 0;
   const sum = article.sentences.reduce((total, sentence) => total + sentence.masteryScore, 0);
   return sum / article.sentences.length;
+}
+
+function showReport() {
+  const totalArticles = articles.length;
+  const totalSentences = articles.reduce((sum, a) => sum + (a.sentences?.length || 0), 0);
+  let totalScore = 0;
+  let scoredCount = 0;
+  const recent = [];
+  articles.forEach(article => {
+    article.sentences.forEach(sentence => {
+      if (typeof sentence.masteryScore === 'number') {
+        totalScore += sentence.masteryScore;
+        scoredCount += 1;
+      }
+      (sentence.history || []).forEach(h => {
+        recent.push({
+          articleTitle: article.title,
+          sentence: sentence.text,
+          timestamp: h.timestamp,
+          score: h.score,
+        });
+      });
+    });
+  });
+  const overall = scoredCount ? Math.round(totalScore / scoredCount) : 0;
+  if (elements.reportTotalArticles) elements.reportTotalArticles.textContent = totalArticles;
+  if (elements.reportTotalSentences) elements.reportTotalSentences.textContent = totalSentences;
+  if (elements.reportOverallMastery) elements.reportOverallMastery.textContent = `${overall}%`;
+
+  recent.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const recentList = recent.slice(0, 10).map(r => `<div class="report-row">${new Date(r.timestamp).toLocaleString()} · <strong>${escapeHtml(r.articleTitle)}</strong> · ${escapeHtml(r.sentence)} · 得分：${r.score}%</div>`).join('');
+  if (elements.reportRecent) elements.reportRecent.innerHTML = recentList || '<div class="empty-state">暂无复习记录。</div>';
 }
 
 function showFeedback(message, type = 'info') {

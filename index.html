@@ -12,15 +12,26 @@
       <h1>Dutch Dictation Flow</h1>
       <p>基于 GitHub Pages 的原生静态应用：按文章管理句子、上传句子音频、听写复习与备份存储。</p>
     </div>
-    <nav class="page-nav">
-      <button class="btn btn-secondary nav-btn active" data-page="list">文章管理</button>
-      <button class="btn btn-secondary nav-btn" data-page="backup">数据备份</button>
-    </nav>
   </header>
 
-  <main class="app-shell">
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <h2>功能导航</h2>
+        <p>在这里快速切换页面，管理文章、句子和备份。</p>
+      </div>
+      <nav class="page-nav">
+        <button class="btn btn-secondary nav-btn active" data-page="list">文章列表</button>
+        <button class="btn btn-secondary nav-btn" data-page="edit">文章编辑</button>
+        <button class="btn btn-secondary nav-btn" data-page="review">复习页面</button>
+        <button class="btn btn-secondary nav-btn" data-page="report">报告页面</button>
+        <button class="btn btn-secondary nav-btn" data-page="backup">数据备份</button>
+      </nav>
+    </aside>
+
+    <main class="app-content">
     <section class="card" id="article-creator">
-      <h2>创建文章与上传音频</h2>
+      <h2>创建文章</h2>
       <form id="article-form">
         <div class="field-row">
           <label>文章标题</label>
@@ -116,6 +127,19 @@
       <p id="backup-status" class="help-text"></p>
     </section>
 
+    <section class="card hidden" id="report-panel">
+      <h2>学习报告</h2>
+      <div class="field-row">
+        <div>文章总数：<strong id="report-total-articles">0</strong></div>
+        <div>句子总数：<strong id="report-total-sentences">0</strong></div>
+        <div>整体熟练度：<strong id="report-overall-mastery">0%</strong></div>
+      </div>
+      <div class="field-row">
+        <h3>最近复习记录</h3>
+        <div id="report-recent"></div>
+      </div>
+    </section>
+
     <section class="card hidden" id="review-panel">
       <div class="detail-header">
         <div>
@@ -158,7 +182,8 @@
         <div id="feedback" class="feedback hidden"></div>
       </div>
     </section>
-  </main>
+    </main>
+  </div>
 
   <template id="sentence-row-template">
     <div class="sentence-row">
