@@ -11,6 +11,7 @@ let audioBlobCache = new Map();
 
 const elements = {
   articleForm: document.getElementById('article-form'),
+  articleCreator: document.getElementById('article-creator'),
   title: document.getElementById('article-title'),
   source: document.getElementById('article-source'),
   tags: document.getElementById('article-tags'),
@@ -86,6 +87,7 @@ function bindEvents() {
 }
 
 function showSection(mode) {
+  elements.articleCreator.classList.toggle('hidden', mode !== 'create');
   elements.articleDetail.classList.toggle('hidden', mode !== 'edit');
   elements.reviewPanel.classList.toggle('hidden', mode !== 'review');
   elements.backupPanel.classList.toggle('hidden', mode !== 'backup');
@@ -108,6 +110,8 @@ function handlePageNav(event) {
   const page = event.currentTarget.dataset.page;
   if (page === 'list') {
     showSection('list');
+  } else if (page === 'create') {
+    showSection('create');
   } else if (page === 'backup') {
     showSection('backup');
   } else if (page === 'edit') {
