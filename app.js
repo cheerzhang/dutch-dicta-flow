@@ -29,6 +29,7 @@ const elements = {
   sentenceAudio: document.getElementById('sentence-audio'),
   sentenceDifficulty: document.getElementById('sentence-difficulty'),
   sentenceTags: document.getElementById('sentence-tags'),
+  sentenceAudioInfo: document.getElementById('sentence-audio-info'),
   sentenceReset: document.getElementById('sentence-reset'),
   sentences: document.getElementById('sentences'),
   backupPanel: document.getElementById('backup-panel'),
@@ -297,9 +298,10 @@ function renderSentenceList(article) {
   article.sentences.forEach((sentence, index) => {
     const template = elements.sentenceTemplate.content.cloneNode(true);
     const row = template.querySelector('.sentence-row');
+    const audioLabel = sentence.audioId ? `音频：${escapeHtml(sentence.audioName || '已上传')}` : '无音频';
     row.querySelector('.sentence-text').textContent = `${index + 1}. ${sentence.text}`;
     row.querySelector('.sentence-translation').textContent = sentence.translation ? `翻译：${sentence.translation}` : '';
-    row.querySelector('.sentence-meta-line').textContent = `${sentence.audioId ? '已上传音频' : '无音频'} · 难度：${sentence.difficulty || '无'} · 标签：${sentence.tags.join('，') || '无'} · 复习：${sentence.reviewCount}`;
+    row.querySelector('.sentence-meta-line').textContent = `${audioLabel} · 难度：${sentence.difficulty || '无'} · 标签：${sentence.tags.join('，') || '无'} · 复习：${sentence.reviewCount}`;
 
     row.querySelector('.play-sentence-btn').addEventListener('click', () => playSentence(article.id, sentence.id));
     row.querySelector('.review-sentence-btn').addEventListener('click', () => reviewSingleSentence(article.id, sentence.id));
@@ -332,6 +334,9 @@ function loadSentenceForEdit(articleId, sentenceId) {
   elements.sentenceAudio.value = '';
   elements.sentenceDifficulty.value = sentence.difficulty || '';
   elements.sentenceTags.value = sentence.tags.join('，');
+  elements.sentenceAudioInfo.textContent = sentence.audioName
+    ? `当前音频：${sentence.audioName}。上传新文件可覆盖当前音频。`
+    : '当前还未上传音频，请选择文件进行上传。';
   elements.sentenceForm.dataset.editingId = sentence.id;
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -427,6 +432,7 @@ function resetSentenceForm() {
   elements.sentenceAudio.value = '';
   elements.sentenceDifficulty.value = '';
   elements.sentenceTags.value = '';
+  elements.sentenceAudioInfo.textContent = '如果是编辑句子，可通过重新上传音频覆盖当前音频；不想修改则留空。';
   elements.sentenceForm.dataset.editingId = '';
 }
 

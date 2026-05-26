@@ -87,6 +87,7 @@
           <div class="field-row">
             <label>上传句子音频</label>
             <input type="file" id="sentence-audio" accept="audio/*" />
+            <div id="sentence-audio-info" class="audio-info">如果是编辑句子，可通过重新上传音频覆盖当前音频；不想修改则留空。</div>
           </div>
           <div class="field-row two-column">
             <div>
@@ -196,7 +197,7 @@
       <div class="sentence-actions-row">
         <button class="btn btn-small btn-primary play-sentence-btn">播放</button>
         <button class="btn btn-small btn-secondary review-sentence-btn">复习</button>
-        <button class="btn btn-small btn-secondary edit-sentence-btn">编辑</button>
+        <button class="btn btn-small btn-secondary edit-sentence-btn">编辑 / 更新音频</button>
         <button class="btn btn-small btn-secondary move-up-sentence-btn">上移</button>
         <button class="btn btn-small btn-secondary move-down-sentence-btn">下移</button>
       </div>
