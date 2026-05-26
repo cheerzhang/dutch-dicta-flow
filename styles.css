@@ -447,6 +447,54 @@ body {
   margin-bottom: 10px;
 }
 
+.review-summary {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 20px;
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.review-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.review-summary-header h3 {
+  margin: 0;
+}
+
+.review-summary-score {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.review-summary-body {
+  display: grid;
+  gap: 12px;
+}
+
+.review-summary-list {
+  display: grid;
+  gap: 8px;
+}
+
+.review-summary-list div {
+  background: rgba(255, 255, 255, 1);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.review-word-book {
+  display: grid;
+  gap: 8px;
+}
+
 @media (max-width: 1000px) {
   .app-container {
     grid-template-columns: 1fr;

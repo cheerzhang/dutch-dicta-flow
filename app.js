@@ -34,6 +34,8 @@ const elements = {
   sentenceAudioInfo: document.getElementById('sentence-audio-info'),
   sentenceReset: document.getElementById('sentence-reset'),
   sentences: document.getElementById('sentences'),
+  reviewSentenceDifficultyLabel: document.getElementById('review-sentence-difficulty'),
+  reviewSentenceTagsLabel: document.getElementById('review-sentence-tags'),
   backupPanel: document.getElementById('backup-panel'),
   backupExport: document.getElementById('backup-export'),
   backupImport: document.getElementById('backup-import'),
@@ -54,14 +56,13 @@ const elements = {
   quizTotal: document.getElementById('quiz-total'),
   quizMastery: document.getElementById('quiz-mastery'),
   sentenceNumber: document.getElementById('sentence-number'),
-  sentenceDifficultyLabel: document.getElementById('sentence-difficulty'),
-  sentenceTagsLabel: document.getElementById('sentence-tags'),
   playSentence: document.getElementById('play-sentence'),
   showAnswer: document.getElementById('show-answer'),
   dictationInput: document.getElementById('dictation-input'),
   submitAnswer: document.getElementById('submit-answer'),
   nextSentence: document.getElementById('next-sentence'),
   feedback: document.getElementById('feedback'),
+  reviewSummary: document.getElementById('review-summary'),
   endReview: document.getElementById('end-review'),
   sentenceTemplate: document.getElementById('sentence-row-template'),
 };
@@ -519,6 +520,8 @@ function startReview(articleId, focusSentenceId = null) {
     articleId,
     sentenceIds: article.sentences.map(s => s.id),
     index: 0,
+    doneIds: new Set(),
+    sessionScores: [],
   };
 
   if (focusSentenceId) {
@@ -526,6 +529,7 @@ function startReview(articleId, focusSentenceId = null) {
     if (idx >= 0) currentReview.index = idx;
   }
 
+  clearReviewSummary();
   renderReviewItem();
   showSection('review');
 }
@@ -542,10 +546,11 @@ async function renderReviewItem() {
   elements.quizTotal.textContent = currentReview.sentenceIds.length;
   elements.quizMastery.textContent = `${Math.round(article.masteryScore)}%`;
   elements.sentenceNumber.textContent = `句子 ${currentReview.index + 1}`;
-  elements.sentenceDifficultyLabel.textContent = sentence.difficulty ? `难度：${sentence.difficulty}` : '难度：未设置';
-  elements.sentenceTagsLabel.textContent = sentence.tags.length ? `标签：${sentence.tags.join('，')}` : '标签：无';
+  elements.reviewSentenceDifficultyLabel.textContent = sentence.difficulty ? `难度：${sentence.difficulty}` : '难度：未设置';
+  elements.reviewSentenceTagsLabel.textContent = sentence.tags.length ? `标签：${sentence.tags.join('，')}` : '标签：无';
   elements.dictationInput.value = '';
   showFeedback('', '');
+  clearReviewSummary();
   const audioUrl = await getAudioUrl(sentence.audioId);
   reviewAudio.src = audioUrl;
   reviewAudio.pause();
@@ -605,15 +610,44 @@ function handleSubmitAnswer() {
   article.updatedAt = new Date().toISOString();
   saveArticles();
 
+  currentReview.doneIds.add(sentence.id);
+  currentReview.sessionScores.push({
+    sentence: sentence.text,
+    score,
+    answer,
+    correctText: sentence.text,
+  });
+
   showFeedback(`得分：${score}% 。已累计复习 ${sentence.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
   elements.quizMastery.textContent = `${Math.round(article.masteryScore)}%`;
+
+  if (currentReview.doneIds.size >= currentReview.sentenceIds.length) {
+    completeReview(article);
+  }
 }
 
 function showNextSentence() {
   if (!currentReview) return;
   const article = findArticle(currentReview.articleId);
-  currentReview.index = (currentReview.index + 1) % currentReview.sentenceIds.length;
-  renderReviewItem();
+  const total = currentReview.sentenceIds.length;
+  let nextIndex = currentReview.index + 1;
+  while (nextIndex < total && currentReview.doneIds.has(currentReview.sentenceIds[nextIndex])) {
+    nextIndex += 1;
+  }
+
+  if (nextIndex >= total) {
+    const remaining = currentReview.sentenceIds.filter(id => !currentReview.doneIds.has(id));
+    if (remaining.length === 0) {
+      completeReview(article);
+      return;
+    }
+    nextIndex = currentReview.sentenceIds.findIndex(id => !currentReview.doneIds.has(id));
+  }
+
+  if (nextIndex >= 0 && nextIndex < total) {
+    currentReview.index = nextIndex;
+    renderReviewItem();
+  }
 }
 
 function calculateScore(target, answer) {
@@ -686,6 +720,56 @@ function showFeedback(message, type = 'info') {
   }
   elements.feedback.textContent = message;
   elements.feedback.className = `feedback ${type === 'success' ? 'success' : type === 'warning' ? 'warning' : type === 'danger' ? 'error' : ''}`;
+}
+
+function completeReview(article) {
+  if (!currentReview) return;
+  const summary = {
+    total: currentReview.sentenceIds.length,
+    scores: currentReview.sessionScores.map(item => ({ sentence: item.sentence, score: item.score })),
+    average: currentReview.sessionScores.length
+      ? Math.round(currentReview.sessionScores.reduce((sum, item) => sum + item.score, 0) / currentReview.sessionScores.length)
+      : 0,
+    wrongWords: wordBook.slice(0, 10),
+  };
+
+  elements.submitAnswer.disabled = true;
+  elements.nextSentence.disabled = true;
+  elements.playSentence.disabled = true;
+  elements.showAnswer.disabled = true;
+
+  renderReviewSummary(summary);
+  showFeedback('本次复习已完成，查看下方总结或点击“结束复习”。', 'success');
+}
+
+function clearReviewSummary() {
+  if (!elements.reviewSummary) return;
+  elements.reviewSummary.classList.add('hidden');
+  elements.reviewSummary.innerHTML = '';
+  elements.submitAnswer.disabled = false;
+  elements.nextSentence.disabled = false;
+  elements.playSentence.disabled = false;
+  elements.showAnswer.disabled = false;
+}
+
+function renderReviewSummary(summary) {
+  if (!elements.reviewSummary) return;
+  const lines = summary.scores.map(item => `【${item.score}%】 ${escapeHtml(item.sentence)}`);
+  const wordBookHtml = summary.wrongWords.length
+    ? `<div class="review-word-book"><h4>近期错词</h4>${summary.wrongWords.slice(0, 5).map(item => `<div>${escapeHtml(item.word)} (${item.count})</div>`).join('')}</div>`
+    : '<div class="empty-state">暂无错词。</div>';
+
+  elements.reviewSummary.innerHTML = `
+    <div class="review-summary-header">
+      <h3>复习完成</h3>
+      <div class="review-summary-score">平均得分：${summary.average}%</div>
+    </div>
+    <div class="review-summary-body">
+      <div class="review-summary-list">${lines.join('')}</div>
+      ${wordBookHtml}
+    </div>
+  `;
+  elements.reviewSummary.classList.remove('hidden');
 }
 
 function splitTags(value) {
@@ -810,6 +894,7 @@ function openArticleDetail(articleId) {
   elements.detailMeta.textContent = `来源：${article.source || '未知'} · 标签：${article.tags ? article.tags.join('，') : '无'}`;
   elements.detailMastery.textContent = `${Math.round(article.masteryScore || 0)}%`;
   elements.detailReviewCount.textContent = article.reviewCount || 0;
+  resetSentenceForm();
   showSection('edit');
   renderSentences(article);
 }
@@ -876,6 +961,88 @@ function renderSentences(article) {
 
     container.appendChild(node);
   });
+}
+
+async function handleSentenceSubmit(event) {
+  event.preventDefault();
+  if (!selectedArticleId) {
+    showFeedback('请先选择一篇文章再保存句子。', 'warning');
+    return;
+  }
+
+  const article = findArticle(selectedArticleId);
+  if (!article) {
+    showFeedback('当前文章不存在，请重新选择。', 'warning');
+    return;
+  }
+  article.sentences = Array.isArray(article.sentences) ? article.sentences : [];
+
+  const sentenceId = elements.sentenceForm.dataset.editing;
+  const text = elements.sentenceText.value.trim();
+  const translation = elements.sentenceTranslation.value.trim();
+  const difficulty = elements.sentenceDifficulty.value.trim();
+  const tags = splitTags(elements.sentenceTags.value);
+  const file = elements.sentenceAudio.files[0];
+
+  if (!text) {
+    showFeedback('句子文本不能为空。', 'warning');
+    return;
+  }
+
+  let sentence = null;
+  if (sentenceId) {
+    sentence = article.sentences.find(s => s.id === sentenceId);
+    if (!sentence) {
+      showFeedback('要编辑的句子未找到，请重新选择。', 'warning');
+      return;
+    }
+  }
+
+  if (file) {
+    try {
+      const savedId = await saveAudioBlob(sentence ? sentence.audioId : null, file);
+      if (!sentence) {
+        sentence = { id: generateId(), text: '', translation: '', difficulty: '', tags: [], audioId: savedId, audioName: file.name || '', reviewCount: 0, masteryScore: 0, history: [] };
+      }
+      sentence.audioId = savedId;
+      sentence.audioName = file.name || sentence.audioName || '';
+    } catch (err) {
+      showFeedback(`音频保存失败：${err.message}`, 'danger');
+      return;
+    }
+  }
+
+  if (!sentence) {
+    sentence = {
+      id: generateId(),
+      text,
+      translation,
+      difficulty,
+      tags,
+      audioId: null,
+      audioName: '',
+      reviewCount: 0,
+      masteryScore: 0,
+      history: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    article.sentences = article.sentences || [];
+    article.sentences.push(sentence);
+  } else {
+    sentence.text = text;
+    sentence.translation = translation;
+    sentence.difficulty = difficulty;
+    sentence.tags = tags;
+    sentence.updatedAt = new Date().toISOString();
+  }
+
+  article.updatedAt = new Date().toISOString();
+  if (!article.reviewCount) article.reviewCount = 0;
+  if (!article.masteryScore) article.masteryScore = calculateArticleMastery(article);
+  saveArticles();
+  openArticleDetail(article.id);
+  showFeedback('句子已保存。', 'success');
 }
 
 function resetSentenceForm() {
