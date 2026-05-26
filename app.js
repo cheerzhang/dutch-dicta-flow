@@ -1,8 +1,10 @@
 const STORAGE_KEY = 'dutchDictaArticles';
+const WORD_BOOK_KEY = 'dutchDictaWordBook';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
 
 let articles = [];
+let wordBook = [];
 let selectedArticleId = null;
 let currentReview = null;
 let reviewAudio = new Audio();
@@ -43,6 +45,8 @@ const elements = {
   reportTotalArticles: document.getElementById('report-total-articles'),
   reportTotalSentences: document.getElementById('report-total-sentences'),
   reportOverallMastery: document.getElementById('report-overall-mastery'),
+  reportTotalWrongWords: document.getElementById('report-total-wrong-words'),
+  reportWordBook: document.getElementById('report-word-book'),
   reportRecent: document.getElementById('report-recent'),
   reviewTitle: document.getElementById('review-title'),
   reviewSubtitle: document.getElementById('review-subtitle'),
@@ -67,24 +71,60 @@ let db = null;
 window.addEventListener('DOMContentLoaded', async () => {
   await initDatabase();
   loadArticles();
-  renderArticleList();
-  bindEvents();
+  loadWordBook();
+  try {
+    if (typeof renderArticleList === 'function') renderArticleList();
+  } catch (err) {
+    console.error('renderArticleList error', err);
+  }
+  try {
+    bindEvents();
+  } catch (err) {
+    console.error('bindEvents error', err);
+  }
 });
 
 function bindEvents() {
-  elements.articleForm.addEventListener('submit', handleArticleSubmit);
-  elements.backToList.addEventListener('click', () => showSection('list'));
-  elements.sentenceForm.addEventListener('submit', handleSentenceSubmit);
-  elements.sentenceReset.addEventListener('click', resetSentenceForm);
-  elements.startReview.addEventListener('click', () => startReview(selectedArticleId));
-  elements.playSentence.addEventListener('click', playCurrentSentenceAudio);
-  elements.showAnswer.addEventListener('click', revealSentenceAnswer);
-  elements.submitAnswer.addEventListener('click', handleSubmitAnswer);
-  elements.nextSentence.addEventListener('click', showNextSentence);
-  elements.endReview.addEventListener('click', () => showSection('edit'));
-  elements.backupExport.addEventListener('click', exportBackup);
-  elements.backupImport.addEventListener('change', handleBackupImport);
-  elements.pageNavButtons.forEach(btn => btn.addEventListener('click', handlePageNav));
+  if (elements.articleForm && typeof handleArticleSubmit === 'function') {
+    elements.articleForm.addEventListener('submit', handleArticleSubmit);
+  }
+  if (elements.backToList) {
+    elements.backToList.addEventListener('click', () => showSection('list'));
+  }
+  if (elements.sentenceForm && typeof handleSentenceSubmit === 'function') {
+    elements.sentenceForm.addEventListener('submit', handleSentenceSubmit);
+  }
+  if (elements.sentenceReset && typeof resetSentenceForm === 'function') {
+    elements.sentenceReset.addEventListener('click', resetSentenceForm);
+  }
+  if (elements.startReview) {
+    elements.startReview.addEventListener('click', () => startReview(selectedArticleId));
+  }
+  if (elements.playSentence) {
+    elements.playSentence.addEventListener('click', playCurrentSentenceAudio);
+  }
+  if (elements.showAnswer) {
+    elements.showAnswer.addEventListener('click', revealSentenceAnswer);
+  }
+  if (elements.submitAnswer) {
+    elements.submitAnswer.addEventListener('click', handleSubmitAnswer);
+  }
+  if (elements.nextSentence) {
+    elements.nextSentence.addEventListener('click', showNextSentence);
+  }
+  if (elements.endReview) {
+    elements.endReview.addEventListener('click', () => showSection('edit'));
+  }
+  if (elements.backupExport && typeof exportBackup === 'function') {
+    elements.backupExport.addEventListener('click', exportBackup);
+  }
+  if (elements.backupImport) {
+    elements.backupImport.addEventListener('change', handleBackupImport);
+  }
+  const navButtons = document.querySelectorAll('.page-nav .nav-btn');
+  if (navButtons && navButtons.forEach) {
+    navButtons.forEach(btn => btn.addEventListener('click', handlePageNav));
+  }
 }
 
 function showSection(mode) {
@@ -164,428 +204,73 @@ function saveArticles() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(articles));
 }
 
-function handleArticleSubmit(event) {
-  event.preventDefault();
-  const title = elements.title.value.trim();
-  const source = elements.source.value.trim();
-  const tags = splitTags(elements.tags.value);
-
-  if (!title) return;
-
-  const article = {
-    id: generateId(),
-    title,
-    source,
-    tags,
-    sentences: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    reviewCount: 0,
-    masteryScore: 0,
-  };
-
-  articles.unshift(article);
-  saveArticles();
-  renderArticleList();
-  resetArticleForm();
-  openArticleDetail(article.id);
-}
-
-function resetArticleForm() {
-  elements.title.value = '';
-  elements.source.value = '';
-  elements.tags.value = '';
-}
-
-function renderArticleList() {
-  elements.articles.innerHTML = '';
-  if (articles.length === 0) {
-    elements.emptyList.classList.remove('hidden');
-    return;
-  }
-  elements.emptyList.classList.add('hidden');
-
-  articles.forEach(article => {
-    const articleCard = document.createElement('div');
-    articleCard.className = 'card';
-    articleCard.innerHTML = `
-      <div class="detail-header">
-        <div>
-          <h3>${escapeHtml(article.title)}</h3>
-          <div class="sentence-meta-line">来源：${escapeHtml(article.source || '未设置')} · 句子：${article.sentences.length} · 熟练度：${Math.round(article.masteryScore)}%</div>
-          <div class="sentence-meta-line">标签：${article.tags.join('，') || '无'}</div>
-        </div>
-        <div class="sentence-actions">
-          <button class="btn btn-primary" data-action="open" data-id="${article.id}">查看</button>
-          <button class="btn btn-secondary" data-action="review" data-id="${article.id}">复习</button>
-          <button class="btn btn-secondary" data-action="delete" data-id="${article.id}">删除</button>
-        </div>
-      </div>
-    `;
-    articleCard.querySelector('[data-action="open"]').addEventListener('click', () => openArticleDetail(article.id));
-    articleCard.querySelector('[data-action="review"]').addEventListener('click', () => startReview(article.id));
-    articleCard.querySelector('[data-action="delete"]').addEventListener('click', () => deleteArticle(article.id));
-    elements.articles.appendChild(articleCard);
-  });
-}
-
-async function deleteAudio(audioId) {
-  if (!audioId || !db) return;
+function loadWordBook() {
+  const raw = localStorage.getItem(WORD_BOOK_KEY);
   try {
-    const transaction = db.transaction(DB_STORE, 'readwrite');
-    const store = transaction.objectStore(DB_STORE);
-    store.delete(audioId);
-    if (audioBlobCache.has(audioId)) {
-      const url = audioBlobCache.get(audioId);
-      try { URL.revokeObjectURL(url); } catch (e) {}
-      audioBlobCache.delete(audioId);
-    }
-    return new Promise((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
+    wordBook = raw ? JSON.parse(raw) : [];
   } catch (e) {
-    return Promise.resolve();
+    wordBook = [];
   }
 }
 
-async function deleteArticle(articleId) {
-  const idx = articles.findIndex(a => a.id === articleId);
-  if (idx === -1) return;
-  const ok = confirm('确定要删除该文章及其所有句子音频吗？此操作不可撤销。');
-  if (!ok) return;
-  const article = articles[idx];
-  // delete associated audio blobs
-  const audioDeletes = [];
-  (article.sentences || []).forEach(s => {
-    if (s.audioId) audioDeletes.push(deleteAudio(s.audioId));
-  });
-  await Promise.all(audioDeletes);
-  // remove article
-  articles.splice(idx, 1);
-  saveArticles();
-  renderArticleList();
-  // if currently selected, go back to list
-  if (selectedArticleId === articleId) {
-    selectedArticleId = null;
-    showSection('list');
-  }
+function saveWordBook() {
+  localStorage.setItem(WORD_BOOK_KEY, JSON.stringify(wordBook));
 }
 
-async function openArticleDetail(articleId) {
-  selectedArticleId = articleId;
-  const article = findArticle(articleId);
-  if (!article) return;
-
-  elements.detailTitle.textContent = article.title;
-  elements.detailMeta.textContent = `来源：${article.source || '未设置'} · 标签：${article.tags.join('，') || '无'}`;
-  elements.detailMastery.textContent = `${Math.round(article.masteryScore)}%`;
-  elements.detailReviewCount.textContent = article.reviewCount;
-  elements.sentenceForm.dataset.articleId = article.id;
-  elements.sentenceForm.dataset.editingId = '';
-  resetSentenceForm();
-  renderSentenceList(article);
-  showSection('edit');
+function tokenizeWords(text) {
+  return String(text)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
-function renderSentenceList(article) {
-  elements.sentences.innerHTML = '';
-  if (article.sentences.length === 0) {
-    elements.sentences.innerHTML = '<p class="empty-state">请先添加句子，并为每句上传对应音频。</p>';
-    return;
-  }
-
-  article.sentences.forEach((sentence, index) => {
-    const template = elements.sentenceTemplate.content.cloneNode(true);
-    const row = template.querySelector('.sentence-row');
-    const audioLabel = sentence.audioId ? `音频：${escapeHtml(sentence.audioName || '已上传')}` : '无音频';
-    row.querySelector('.sentence-text').textContent = `${index + 1}. ${sentence.text}`;
-    row.querySelector('.sentence-translation').textContent = sentence.translation ? `翻译：${sentence.translation}` : '';
-    row.querySelector('.sentence-meta-line').textContent = `${audioLabel} · 难度：${sentence.difficulty || '无'} · 标签：${sentence.tags.join('，') || '无'} · 复习：${sentence.reviewCount}`;
-
-    row.querySelector('.play-sentence-btn').addEventListener('click', () => playSentence(article.id, sentence.id));
-    row.querySelector('.review-sentence-btn').addEventListener('click', () => reviewSingleSentence(article.id, sentence.id));
-    row.querySelector('.edit-sentence-btn').addEventListener('click', () => loadSentenceForEdit(article.id, sentence.id));
-    row.querySelector('.move-up-sentence-btn').addEventListener('click', () => moveSentence(article.id, sentence.id, -1));
-    row.querySelector('.move-down-sentence-btn').addEventListener('click', () => moveSentence(article.id, sentence.id, 1));
-    elements.sentences.appendChild(row);
-  });
-}
-
-async function playSentence(articleId, sentenceId) {
-  const article = findArticle(articleId);
-  const sentence = article.sentences.find(s => s.id === sentenceId);
-  if (!sentence || !sentence.audioId) {
-    alert('该句子尚未上传音频。');
-    return;
-  }
-  const url = await getAudioUrl(sentence.audioId);
-  reviewAudio.src = url;
-  reviewAudio.play();
-}
-
-function loadSentenceForEdit(articleId, sentenceId) {
-  const article = findArticle(articleId);
-  const sentence = article?.sentences.find(s => s.id === sentenceId);
-  if (!sentence) return;
-
-  elements.sentenceText.value = sentence.text;
-  elements.sentenceTranslation.value = sentence.translation || '';
-  elements.sentenceAudio.value = '';
-  elements.sentenceDifficulty.value = sentence.difficulty || '';
-  elements.sentenceTags.value = sentence.tags.join('，');
-  elements.sentenceAudioInfo.textContent = sentence.audioName
-    ? `当前音频：${sentence.audioName}。上传新文件可覆盖当前音频。`
-    : '当前还未上传音频，请选择文件进行上传。';
-  elements.sentenceForm.dataset.editingId = sentence.id;
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-function moveSentence(articleId, sentenceId, direction) {
-  const article = findArticle(articleId);
-  if (!article) return;
-  const index = article.sentences.findIndex(s => s.id === sentenceId);
-  if (index === -1) return;
-  const targetIndex = index + direction;
-  if (targetIndex < 0 || targetIndex >= article.sentences.length) return;
-  const [item] = article.sentences.splice(index, 1);
-  article.sentences.splice(targetIndex, 0, item);
-  article.updatedAt = new Date().toISOString();
-  saveArticles();
-  renderSentenceList(article);
-}
-
-function reviewSingleSentence(articleId, sentenceId) {
-  startReview(articleId, sentenceId);
-}
-
-function handleSentenceSubmit(event) {
-  event.preventDefault();
-  const article = findArticle(selectedArticleId);
-  if (!article) return;
-
-  const editingId = elements.sentenceForm.dataset.editingId;
-  const sentenceData = {
-    text: elements.sentenceText.value.trim(),
-    translation: elements.sentenceTranslation.value.trim(),
-    difficulty: elements.sentenceDifficulty.value.trim(),
-    tags: splitTags(elements.sentenceTags.value),
-  };
-  const file = elements.sentenceAudio.files[0] || null;
-
-  if (!sentenceData.text) {
-    alert('请填写句子文本。');
-    return;
-  }
-
-  if (editingId) {
-    const sentence = article.sentences.find(s => s.id === editingId);
-    if (sentence) {
-      Object.assign(sentence, sentenceData);
-      if (file) {
-        const audioKey = `${editingId}-${Date.now()}`;
-        saveAudioBlob(audioKey, file).then(id => {
-          sentence.audioId = id;
-          sentence.audioName = file.name;
-          sentence.updatedAt = new Date().toISOString();
-          saveArticles();
-          renderSentenceList(article);
-        });
-      }
-      sentence.updatedAt = new Date().toISOString();
-    }
-  } else {
-    const sentence = {
-      id: generateId(),
-      ...sentenceData,
-      audioId: null,
-      audioName: null,
-      reviewCount: 0,
-      masteryScore: 0,
-      lastReviewed: null,
-      history: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    article.sentences.push(sentence);
-    if (file) {
-      const audioKey = `${sentence.id}-${Date.now()}`;
-      saveAudioBlob(audioKey, file).then(id => {
-        sentence.audioId = id;
-        sentence.audioName = file.name;
-        sentence.updatedAt = new Date().toISOString();
-        saveArticles();
-        renderSentenceList(article);
-      });
+function getMistypedWords(target, answer) {
+  const targetWords = tokenizeWords(target);
+  const answerWords = tokenizeWords(answer);
+  const wrong = [];
+  const length = Math.max(targetWords.length, answerWords.length);
+  for (let i = 0; i < length; i += 1) {
+    const expected = targetWords[i] || '';
+    const actual = answerWords[i] || '';
+    if (expected && expected !== actual) {
+      wrong.push(expected);
     }
   }
-
-  article.updatedAt = new Date().toISOString();
-  saveArticles();
-  renderSentenceList(article);
-  resetSentenceForm();
+  return Array.from(new Set(wrong));
 }
 
-function resetSentenceForm() {
-  elements.sentenceText.value = '';
-  elements.sentenceTranslation.value = '';
-  elements.sentenceAudio.value = '';
-  elements.sentenceDifficulty.value = '';
-  elements.sentenceTags.value = '';
-  elements.sentenceAudioInfo.textContent = '如果是编辑句子，可通过重新上传音频覆盖当前音频；不想修改则留空。';
-  elements.sentenceForm.dataset.editingId = '';
-}
+function registerWordMistakes(sentence, answer, article) {
+  const wrongWords = getMistypedWords(sentence.text, answer);
+  if (!wrongWords.length) return;
+  const timestamp = new Date().toISOString();
 
-async function exportBackup() {
-  try {
-    const audioEntries = await getAllAudioEntries();
-    const audioFiles = await Promise.all(audioEntries.map(async entry => {
-      const data = await blobToBase64(entry.file);
-      return { id: entry.id, type: entry.file.type, data };
-    }));
-    const payload = {
-      version: 1,
-      articles,
-      audioFiles,
-      exportedAt: new Date().toISOString(),
-    };
-    downloadJson(payload, `dutch-dicta-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
-    elements.backupStatus.textContent = '备份已生成，可保存到本地。';
-  } catch (error) {
-    elements.backupStatus.textContent = `备份失败：${error.message}`;
-  }
-}
-
-async function handleBackupImport(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const text = await file.text();
-  try {
-    const data = JSON.parse(text);
-    const result = await importBackup(data);
-    elements.backupStatus.textContent = `备份已导入，新增 ${result.importedCount} 篇，覆盖 ${result.overwrittenCount} 篇。`;
-    elements.backupImport.value = '';
-    renderArticleList();
-    showSection('list');
-  } catch (error) {
-    elements.backupStatus.textContent = `导入失败：${error.message}`;
-  }
-}
-
-function normalizeArticleKey(article) {
-  const title = article.title?.trim().toLowerCase() || '';
-  const source = article.source?.trim().toLowerCase() || '';
-  return `${title}|${source}`;
-}
-
-async function importBackup(data) {
-  if (!data || data.version !== 1 || !Array.isArray(data.articles) || !Array.isArray(data.audioFiles)) {
-    throw new Error('无效的备份文件。');
-  }
-  const importPromises = data.audioFiles.map(async entry => {
-    const blob = dataUrlToBlob(entry.data, entry.type);
-    await saveAudioBlob(entry.id, blob);
-  });
-  await Promise.all(importPromises);
-
-  const existingById = new Map(articles.map(item => [item.id, item]));
-  const existingByKey = new Map(articles.map(item => [normalizeArticleKey(item), item]));
-  let importedCount = 0;
-  let overwrittenCount = 0;
-
-  data.articles.forEach(article => {
-    if (!article.id || !article.title) return;
-    const key = normalizeArticleKey(article);
-    let targetArticle = null;
-
-    if (existingById.has(article.id)) {
-      targetArticle = existingById.get(article.id);
-    } else if (existingByKey.has(key)) {
-      targetArticle = existingByKey.get(key);
+  wrongWords.forEach(word => {
+    const key = word.toLowerCase();
+    let entry = wordBook.find(item => item.word.toLowerCase() === key);
+    if (!entry) {
+      entry = {
+        word,
+        count: 0,
+        lastSeen: timestamp,
+        examples: [],
+      };
+      wordBook.push(entry);
     }
-
-    if (targetArticle) {
-      const oldAudioIds = new Set((targetArticle.sentences || []).map(s => s.audioId).filter(Boolean));
-      const newAudioIds = new Set((article.sentences || []).map(s => s.audioId).filter(Boolean));
-      oldAudioIds.forEach(id => {
-        if (!newAudioIds.has(id)) deleteAudio(id);
-      });
-      const existingId = targetArticle.id;
-      Object.assign(targetArticle, article);
-      targetArticle.id = existingId;
-      overwrittenCount += 1;
-    } else {
-      if (existingById.has(article.id)) {
-        article.id = generateId();
-      }
-      articles.push(article);
-      existingById.set(article.id, article);
-      existingByKey.set(key, article);
-      importedCount += 1;
+    entry.count += 1;
+    entry.lastSeen = timestamp;
+    const example = `${article.title}：${sentence.text}`;
+    if (!entry.examples.includes(example)) {
+      entry.examples.unshift(example);
+    }
+    if (entry.examples.length > 3) {
+      entry.examples.length = 3;
     }
   });
 
-  saveArticles();
-  return { importedCount, overwrittenCount };
+  wordBook.sort((a, b) => b.count - a.count || new Date(b.lastSeen) - new Date(a.lastSeen));
+  saveWordBook();
 }
-
-function downloadJson(value, filename) {
-  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-function dataUrlToBlob(dataUrl, type) {
-  const arr = dataUrl.split(',');
-  const bstr = atob(arr[1]);
-  let n = bstr.length;
-  const u8arr = new Uint8Array(n);
-  while (n--) {
-    u8arr[n] = bstr.charCodeAt(n);
-  }
-  return new Blob([u8arr], { type });
-}
-
-function getAllAudioEntries() {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(DB_STORE, 'readonly');
-    const store = transaction.objectStore(DB_STORE);
-    const request = store.getAll();
-    request.onsuccess = () => resolve(request.result || []);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function findArticle(articleId) {
-  return articles.find(item => item.id === articleId);
-}
-
-async function saveAudioBlob(idOrKey, file) {
-  const id = idOrKey || `audio-${Date.now()}`;
-  const transaction = db.transaction(DB_STORE, 'readwrite');
-  const store = transaction.objectStore(DB_STORE);
-  store.put({ id, file });
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve(id);
-    transaction.onerror = () => reject(transaction.error);
-  });
-}
-
 function getAudioUrl(audioId) {
   if (!audioId) return Promise.resolve('');
   if (audioBlobCache.has(audioId)) {
@@ -608,6 +293,219 @@ function getAudioUrl(audioId) {
     request.onerror = () => reject(request.error);
   });
 }
+
+  function getAllAudioEntries() {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(DB_STORE, 'readonly');
+      const store = transaction.objectStore(DB_STORE);
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function saveAudioBlob(idOrKey, file) {
+    const id = idOrKey || `audio-${Date.now()}`;
+    const transaction = db.transaction(DB_STORE, 'readwrite');
+    const store = transaction.objectStore(DB_STORE);
+    store.put({ id, file });
+    return new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve(id);
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function deleteAudio(audioId) {
+    if (!audioId || !db) return;
+    const transaction = db.transaction(DB_STORE, 'readwrite');
+    const store = transaction.objectStore(DB_STORE);
+    store.delete(audioId);
+    if (audioBlobCache.has(audioId)) {
+      const url = audioBlobCache.get(audioId);
+      try { URL.revokeObjectURL(url); } catch (e) {}
+      audioBlobCache.delete(audioId);
+    }
+    return new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function exportBackup() {
+    try {
+      const audioEntries = await getAllAudioEntries();
+      const audioFiles = await Promise.all(audioEntries.map(async entry => {
+        const data = await blobToBase64(entry.file);
+        return { id: entry.id, type: entry.file.type, data };
+      }));
+      const payload = {
+        version: 1,
+        articles,
+        wordBook,
+        audioFiles,
+        exportedAt: new Date().toISOString(),
+      };
+      downloadJson(payload, `dutch-dicta-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
+      elements.backupStatus.textContent = '备份已生成，可保存到本地。';
+    } catch (error) {
+      elements.backupStatus.textContent = `备份失败：${error.message}`;
+    }
+  }
+
+  async function handleBackupImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const data = JSON.parse(text);
+      const result = await importBackup(data);
+      elements.backupStatus.textContent = `备份已导入，新增 ${result.importedCount} 篇，覆盖 ${result.overwrittenCount} 篇。`;
+      elements.backupImport.value = '';
+      renderArticleList();
+      showSection('list');
+    } catch (error) {
+      elements.backupStatus.textContent = `导入失败：${error.message}`;
+    }
+  }
+
+  async function importBackup(data) {
+    if (!data || !Array.isArray(data.articles)) {
+        throw new Error('无效的备份文件：找不到 articles 数组。');
+      }
+      const audioFilesArray = Array.isArray(data.audioFiles) ? data.audioFiles : [];
+      const importPromises = audioFilesArray.map(async entry => {
+        try {
+          // entry.data may already be a data URL or base64 string
+          const type = entry.type || (entry.data && entry.data.split(';')[0].split(':')[1]) || 'audio/mpeg';
+          const blob = dataUrlToBlob(entry.data, type);
+          await saveAudioBlob(entry.id, blob);
+        } catch (err) {
+          console.warn('跳过无法解析的音频条目', entry && entry.id, err && err.message);
+        }
+      });
+    await Promise.all(importPromises);
+    const existingById = new Map(articles.map(item => [item.id, item]));
+    const existingByKey = new Map(articles.map(item => [`${item.title.trim().toLowerCase()}|${item.source.trim().toLowerCase()}`, item]));
+    let importedCount = 0;
+    let overwrittenCount = 0;
+
+    data.articles.forEach(article => {
+      if (!article || !article.title) return;
+
+      // Normalize legacy article formats so sentences are preserved.
+      // Older backups might store sentences in `content` (string or array), `items`,
+      // or `sentences` as an array of strings. Convert them to the expected
+      // `sentences` array of objects with required fields.
+      try {
+        if (!Array.isArray(article.sentences)) {
+          const candidates = article.content || article.items || null;
+          if (Array.isArray(candidates)) {
+            article.sentences = candidates.map(s => (typeof s === 'string' ? { id: generateId(), text: s } : s));
+          } else if (typeof candidates === 'string') {
+            const lines = candidates.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            article.sentences = lines.map(text => ({ id: generateId(), text }));
+          } else {
+            article.sentences = [];
+          }
+        } else {
+          // If sentences exist but are strings, convert to objects
+          if (article.sentences.length && typeof article.sentences[0] === 'string') {
+            article.sentences = article.sentences.map(text => ({ id: generateId(), text }));
+          }
+        }
+        // Ensure each sentence has standard fields
+        article.sentences = (article.sentences || []).map(s => ({
+          id: s.id || generateId(),
+          text: s.text || s.content || '',
+          translation: s.translation || s.cn || s.note || '',
+          tags: Array.isArray(s.tags) ? s.tags : (s.tag ? [s.tag] : []),
+          difficulty: s.difficulty || s.level || '',
+          audioId: s.audioId || s.audio || null,
+          masteryScore: typeof s.masteryScore === 'number' ? s.masteryScore : (s.score || 0),
+          reviewCount: typeof s.reviewCount === 'number' ? s.reviewCount : (s.reviews || 0),
+          history: Array.isArray(s.history) ? s.history : (s.historyEntries || []),
+        }));
+      } catch (err) {
+        console.warn('文章条目归一化失败，跳过该文章的句子转换', article && article.title, err && err.message);
+        article.sentences = Array.isArray(article.sentences) ? article.sentences : [];
+      }
+
+      const key = `${article.title.trim().toLowerCase()}|${(article.source || '').trim().toLowerCase()}`;
+      let targetArticle = existingById.get(article.id) || existingByKey.get(key);
+      if (targetArticle) {
+        const oldAudioIds = new Set((targetArticle.sentences || []).map(s => s.audioId).filter(Boolean));
+        const newAudioIds = new Set((article.sentences || []).map(s => s.audioId).filter(Boolean));
+        oldAudioIds.forEach(id => { if (!newAudioIds.has(id)) deleteAudio(id); });
+        const existingId = targetArticle.id;
+        Object.assign(targetArticle, article);
+        targetArticle.id = existingId;
+        overwrittenCount += 1;
+      } else {
+        if (existingById.has(article.id)) {
+          article.id = generateId();
+        }
+        articles.push(article);
+        existingById.set(article.id, article);
+        existingByKey.set(key, article);
+        importedCount += 1;
+      }
+    });
+
+    const importedWords = Array.isArray(data.wordBook) ? data.wordBook : [];
+    importedWords.forEach(entry => {
+      if (!entry.word) return;
+      const key = entry.word.trim().toLowerCase();
+      let existing = wordBook.find(item => item.word.trim().toLowerCase() === key);
+      if (!existing) {
+        existing = { word: entry.word, count: 0, lastSeen: entry.lastSeen || new Date().toISOString(), examples: [] };
+        wordBook.push(existing);
+      }
+      existing.count = Math.max(existing.count, entry.count || 0);
+      existing.lastSeen = existing.lastSeen > (entry.lastSeen || existing.lastSeen) ? existing.lastSeen : (entry.lastSeen || existing.lastSeen);
+      (entry.examples || []).forEach(example => {
+        if (!existing.examples.includes(example)) {
+          existing.examples.unshift(example);
+        }
+      });
+      if (existing.examples.length > 3) existing.examples.length = 3;
+    });
+    wordBook.sort((a, b) => b.count - a.count || new Date(b.lastSeen) - new Date(a.lastSeen));
+    saveWordBook();
+    saveArticles();
+    return { importedCount, overwrittenCount };
+  }
+
+  function downloadJson(value, filename) {
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function dataUrlToBlob(dataUrl, type) {
+    const arr = dataUrl.split(',');
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type });
+  }
 
 function startReview(articleId, focusSentenceId = null) {
   const article = findArticle(articleId);
@@ -701,6 +599,7 @@ function handleSubmitAnswer() {
     correctText: sentence.text,
   });
 
+  registerWordMistakes(sentence, answer, article);
   article.reviewCount += 1;
   article.masteryScore = calculateArticleMastery(article);
   article.updatedAt = new Date().toISOString();
@@ -758,10 +657,25 @@ function showReport() {
   if (elements.reportTotalArticles) elements.reportTotalArticles.textContent = totalArticles;
   if (elements.reportTotalSentences) elements.reportTotalSentences.textContent = totalSentences;
   if (elements.reportOverallMastery) elements.reportOverallMastery.textContent = `${overall}%`;
+  if (elements.reportTotalWrongWords) elements.reportTotalWrongWords.textContent = wordBook.length;
 
   recent.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const recentList = recent.slice(0, 10).map(r => `<div class="report-row">${new Date(r.timestamp).toLocaleString()} · <strong>${escapeHtml(r.articleTitle)}</strong> · ${escapeHtml(r.sentence)} · 得分：${r.score}%</div>`).join('');
   if (elements.reportRecent) elements.reportRecent.innerHTML = recentList || '<div class="empty-state">暂无复习记录。</div>';
+
+  if (elements.reportWordBook) {
+    if (!wordBook.length) {
+      elements.reportWordBook.innerHTML = '<div class="empty-state">错词本为空。</div>';
+    } else {
+      elements.reportWordBook.innerHTML = wordBook.slice(0, 12).map(item => `
+        <div class="word-card">
+          <div class="word-card-title">${escapeHtml(item.word)}</div>
+          <div class="word-card-meta">错题次数：${item.count} · 最近：${new Date(item.lastSeen).toLocaleString()}</div>
+          <div class="word-card-examples">${item.examples.map(ex => `<div class="word-example">${escapeHtml(ex)}</div>`).join('')}</div>
+        </div>
+      `).join('');
+    }
+  }
 }
 
 function showFeedback(message, type = 'info') {
@@ -815,4 +729,158 @@ function levenshteinDistance(a, b) {
     }
   }
   return matrix[b.length][a.length];
+}
+
+function findArticle(id) {
+  return articles.find(a => a.id === id);
+}
+
+function renderArticleList() {
+  if (!elements.articles) return;
+  elements.articles.innerHTML = '';
+  if (!articles || articles.length === 0) {
+    elements.emptyList.classList.remove('hidden');
+    return;
+  }
+  elements.emptyList.classList.add('hidden');
+
+  articles.forEach(article => {
+    const card = document.createElement('div');
+    card.className = 'card article-card';
+    const title = document.createElement('h3');
+    title.textContent = article.title;
+    const meta = document.createElement('div');
+    meta.className = 'help-text';
+    meta.textContent = `${article.source || '来源：未知'} · ${article.tags ? article.tags.join('，') : ''}`;
+
+    const actions = document.createElement('div');
+    actions.style.marginTop = '12px';
+    actions.style.display = 'flex';
+    actions.style.gap = '8px';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn btn-secondary';
+    editBtn.textContent = '编辑';
+    editBtn.addEventListener('click', () => openArticleDetail(article.id));
+
+    const reviewBtn = document.createElement('button');
+    reviewBtn.className = 'btn btn-primary';
+    reviewBtn.textContent = '复习';
+    reviewBtn.addEventListener('click', () => startReview(article.id));
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-secondary';
+    delBtn.textContent = '删除';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm(`确定删除文章 “${article.title}” 吗？此操作不能撤销。`)) return;
+      await deleteArticle(article.id);
+      renderArticleList();
+    });
+
+    actions.appendChild(editBtn);
+    actions.appendChild(reviewBtn);
+    actions.appendChild(delBtn);
+
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(actions);
+    elements.articles.appendChild(card);
+  });
+}
+
+async function deleteArticle(articleId) {
+  const idx = articles.findIndex(a => a.id === articleId);
+  if (idx < 0) return;
+  const article = articles[idx];
+  // remove associated audio files
+  (article.sentences || []).forEach(s => {
+    if (s.audioId) {
+      try { deleteAudio(s.audioId); } catch (e) { /* ignore */ }
+    }
+  });
+  articles.splice(idx, 1);
+  saveArticles();
+}
+
+function openArticleDetail(articleId) {
+  const article = findArticle(articleId);
+  if (!article) return;
+  selectedArticleId = articleId;
+  elements.detailTitle.textContent = article.title;
+  elements.detailMeta.textContent = `来源：${article.source || '未知'} · 标签：${article.tags ? article.tags.join('，') : '无'}`;
+  elements.detailMastery.textContent = `${Math.round(article.masteryScore || 0)}%`;
+  elements.detailReviewCount.textContent = article.reviewCount || 0;
+  showSection('edit');
+  renderSentences(article);
+}
+
+function renderSentences(article) {
+  if (!elements.sentences) return;
+  elements.sentences.innerHTML = '';
+  const container = elements.sentences;
+  const tmpl = elements.sentenceTemplate;
+  (article.sentences || []).forEach(s => {
+    const node = tmpl.content ? tmpl.content.cloneNode(true) : tmpl.cloneNode(true);
+    const row = node.querySelector ? node.querySelector('.sentence-row') : node.querySelector('.sentence-row');
+    row.querySelector('.sentence-text').textContent = s.text || '';
+    row.querySelector('.sentence-translation').textContent = s.translation || '';
+    const metaLine = row.querySelector('.sentence-meta-line');
+    metaLine.textContent = `难度：${s.difficulty || '未设置'} · 复习：${s.reviewCount || 0}`;
+
+    const playBtn = row.querySelector('.play-sentence-btn');
+    if (playBtn) playBtn.addEventListener('click', async () => {
+      if (!s.audioId) { alert('该句子没有音频。'); return; }
+      const url = await getAudioUrl(s.audioId);
+      const a = new Audio(url);
+      a.play();
+    });
+
+    const reviewBtn = row.querySelector('.review-sentence-btn');
+    if (reviewBtn) reviewBtn.addEventListener('click', () => startReview(article.id, s.id));
+
+    const editBtn = row.querySelector('.edit-sentence-btn');
+    if (editBtn) editBtn.addEventListener('click', () => {
+      // populate sentence form for editing
+      selectedArticleId = article.id;
+      elements.sentenceText.value = s.text || '';
+      elements.sentenceTranslation.value = s.translation || '';
+      elements.sentenceDifficulty.value = s.difficulty || '';
+      elements.sentenceTags.value = (s.tags || []).join(',');
+      elements.sentenceAudioInfo.textContent = s.audioName ? `当前音频：${s.audioName}` : '当前无音频。';
+      // store editing id on form dataset
+      elements.sentenceForm.dataset.editing = s.id;
+      showSection('edit');
+    });
+
+    const moveUp = row.querySelector('.move-up-sentence-btn');
+    if (moveUp) moveUp.addEventListener('click', () => {
+      const idx = article.sentences.findIndex(x => x.id === s.id);
+      if (idx > 0) {
+        article.sentences.splice(idx, 1);
+        article.sentences.splice(idx - 1, 0, s);
+        saveArticles();
+        renderSentences(article);
+      }
+    });
+
+    const moveDown = row.querySelector('.move-down-sentence-btn');
+    if (moveDown) moveDown.addEventListener('click', () => {
+      const idx = article.sentences.findIndex(x => x.id === s.id);
+      if (idx >= 0 && idx < article.sentences.length - 1) {
+        article.sentences.splice(idx, 1);
+        article.sentences.splice(idx + 1, 0, s);
+        saveArticles();
+        renderSentences(article);
+      }
+    });
+
+    container.appendChild(node);
+  });
+}
+
+function resetSentenceForm() {
+  if (!elements.sentenceForm) return;
+  elements.sentenceForm.reset();
+  elements.sentenceForm.dataset.editing = '';
+  elements.sentenceAudioInfo.textContent = '如果是编辑句子，可通过重新上传音频覆盖当前音频；不想修改则留空。';
 }

@@ -131,14 +131,38 @@
 
     <section class="card hidden" id="report-panel">
       <h2>学习报告</h2>
-      <div class="field-row">
-        <div>文章总数：<strong id="report-total-articles">0</strong></div>
-        <div>句子总数：<strong id="report-total-sentences">0</strong></div>
-        <div>整体熟练度：<strong id="report-overall-mastery">0%</strong></div>
+      <div class="report-grid">
+        <div class="report-metric">
+          <h3>文章总数</h3>
+          <div id="report-total-articles">0</div>
+        </div>
+        <div class="report-metric">
+          <h3>句子总数</h3>
+          <div id="report-total-sentences">0</div>
+        </div>
+        <div class="report-metric">
+          <h3>整体熟练度</h3>
+          <div id="report-overall-mastery">0%</div>
+        </div>
+        <div class="report-metric">
+          <h3>错词数</h3>
+          <div id="report-total-wrong-words">0</div>
+        </div>
       </div>
-      <div class="field-row">
-        <h3>最近复习记录</h3>
-        <div id="report-recent"></div>
+
+      <div class="report-section">
+        <div class="report-section-header">
+          <h3>错词本</h3>
+          <p>复习中拼错的词会自动收录，帮助你复习前后形态，并记录典型句子。</p>
+        </div>
+        <div id="report-word-book" class="report-word-book"></div>
+      </div>
+
+      <div class="report-section">
+        <div class="report-section-header">
+          <h3>最近复习记录</h3>
+        </div>
+        <div id="report-recent" class="report-recent"></div>
       </div>
     </section>
 
