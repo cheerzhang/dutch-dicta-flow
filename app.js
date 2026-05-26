@@ -462,14 +462,20 @@ async function handleBackupImport(event) {
   const text = await file.text();
   try {
     const data = JSON.parse(text);
-    await importBackup(data);
-    elements.backupStatus.textContent = '备份已导入，数据已恢复。';
+    const result = await importBackup(data);
+    elements.backupStatus.textContent = `备份已导入，新增 ${result.importedCount} 篇，覆盖 ${result.overwrittenCount} 篇。`;
     elements.backupImport.value = '';
     renderArticleList();
     showSection('list');
   } catch (error) {
     elements.backupStatus.textContent = `导入失败：${error.message}`;
   }
+}
+
+function normalizeArticleKey(article) {
+  const title = article.title?.trim().toLowerCase() || '';
+  const source = article.source?.trim().toLowerCase() || '';
+  return `${title}|${source}`;
 }
 
 async function importBackup(data) {
@@ -481,16 +487,46 @@ async function importBackup(data) {
     await saveAudioBlob(entry.id, blob);
   });
   await Promise.all(importPromises);
-  const existingIds = new Set(articles.map(item => item.id));
+
+  const existingById = new Map(articles.map(item => [item.id, item]));
+  const existingByKey = new Map(articles.map(item => [normalizeArticleKey(item), item]));
+  let importedCount = 0;
+  let overwrittenCount = 0;
+
   data.articles.forEach(article => {
     if (!article.id || !article.title) return;
-    if (existingIds.has(article.id)) {
-      article.id = generateId();
+    const key = normalizeArticleKey(article);
+    let targetArticle = null;
+
+    if (existingById.has(article.id)) {
+      targetArticle = existingById.get(article.id);
+    } else if (existingByKey.has(key)) {
+      targetArticle = existingByKey.get(key);
     }
-    articles.push(article);
-    existingIds.add(article.id);
+
+    if (targetArticle) {
+      const oldAudioIds = new Set((targetArticle.sentences || []).map(s => s.audioId).filter(Boolean));
+      const newAudioIds = new Set((article.sentences || []).map(s => s.audioId).filter(Boolean));
+      oldAudioIds.forEach(id => {
+        if (!newAudioIds.has(id)) deleteAudio(id);
+      });
+      const existingId = targetArticle.id;
+      Object.assign(targetArticle, article);
+      targetArticle.id = existingId;
+      overwrittenCount += 1;
+    } else {
+      if (existingById.has(article.id)) {
+        article.id = generateId();
+      }
+      articles.push(article);
+      existingById.set(article.id, article);
+      existingByKey.set(key, article);
+      importedCount += 1;
+    }
   });
+
   saveArticles();
+  return { importedCount, overwrittenCount };
 }
 
 function downloadJson(value, filename) {
@@ -539,8 +575,8 @@ function findArticle(articleId) {
   return articles.find(item => item.id === articleId);
 }
 
-async function saveAudioBlob(articleId, file) {
-  const id = `${articleId}-${Date.now()}`;
+async function saveAudioBlob(idOrKey, file) {
+  const id = idOrKey || `audio-${Date.now()}`;
   const transaction = db.transaction(DB_STORE, 'readwrite');
   const store = transaction.objectStore(DB_STORE);
   store.put({ id, file });

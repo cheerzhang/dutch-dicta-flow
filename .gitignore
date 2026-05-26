@@ -1,0 +1,10 @@
+# Ignore local audio files and temporary media
+/audio/
+*.mp3
+*.wav
+*.ogg
+*.m4a
+*.flac
+
+# Ignore backup JSON files if you keep them locally
+*.json
