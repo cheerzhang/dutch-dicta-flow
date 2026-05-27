@@ -6,6 +6,7 @@ const DB_STORE = 'audioFiles';
 let articles = [];
 let wordBook = [];
 let selectedArticleId = null;
+let selectedWordBookId = null;
 let currentReview = null;
 let reviewAudio = new Audio();
 let reviewTimer = null;
@@ -48,7 +49,26 @@ const elements = {
   reportTotalSentences: document.getElementById('report-total-sentences'),
   reportOverallMastery: document.getElementById('report-overall-mastery'),
   reportTotalWrongWords: document.getElementById('report-total-wrong-words'),
+  reportTotalWrongSentences: document.getElementById('report-total-wrong-sentences'),
+  reportSummary: document.getElementById('report-summary'),
   reportWordBook: document.getElementById('report-word-book'),
+  wordbookPanel: document.getElementById('wordbook-panel'),
+  wordbookTotalWords: document.getElementById('wordbook-total-words'),
+  wordbookTotalSentences: document.getElementById('wordbook-total-sentences'),
+  wordbookOverallMastery: document.getElementById('wordbook-overall-mastery'),
+  wordbookPendingReview: document.getElementById('wordbook-pending-review'),
+  wordbookList: document.getElementById('wordbook-list'),
+  wordbookReviewAll: document.getElementById('wordbook-review-all'),
+  wordbookEditPanel: document.getElementById('wordbook-edit-panel'),
+  wordbookEditForm: document.getElementById('wordbook-edit-form'),
+  wordbookEditWord: document.getElementById('wordbook-edit-word'),
+  wordbookEditTranslation: document.getElementById('wordbook-edit-translation'),
+  wordbookEditDifficulty: document.getElementById('wordbook-edit-difficulty'),
+  wordbookEditSource: document.getElementById('wordbook-edit-source'),
+  wordbookEditTags: document.getElementById('wordbook-edit-tags'),
+  wordbookEditAudio: document.getElementById('wordbook-edit-audio'),
+  wordbookEditAudioInfo: document.getElementById('wordbook-edit-audio-info'),
+  wordbookEditCancel: document.getElementById('wordbook-edit-cancel'),
   reportRecent: document.getElementById('report-recent'),
   reviewTitle: document.getElementById('review-title'),
   reviewSubtitle: document.getElementById('review-subtitle'),
@@ -101,6 +121,18 @@ function bindEvents() {
   if (elements.startReview) {
     elements.startReview.addEventListener('click', () => startReview(selectedArticleId));
   }
+  if (elements.wordbookReviewAll) {
+    elements.wordbookReviewAll.addEventListener('click', () => startWordReview());
+  }
+  if (elements.wordbookEditForm) {
+    elements.wordbookEditForm.addEventListener('submit', handleWordBookEditSubmit);
+  }
+  if (elements.wordbookEditCancel) {
+    elements.wordbookEditCancel.addEventListener('click', closeWordBookEditPanel);
+  }
+  if (elements.wordbookList) {
+    elements.wordbookList.addEventListener('click', handleWordbookListClick);
+  }
   if (elements.playSentence) {
     elements.playSentence.addEventListener('click', playCurrentSentenceAudio);
   }
@@ -132,12 +164,16 @@ function showSection(mode) {
   elements.articleCreator.classList.toggle('hidden', mode !== 'create');
   elements.articleDetail.classList.toggle('hidden', mode !== 'edit');
   elements.reviewPanel.classList.toggle('hidden', mode !== 'review');
+  elements.wordbookPanel.classList.toggle('hidden', mode !== 'wordbook');
   elements.backupPanel.classList.toggle('hidden', mode !== 'backup');
   elements.reportPanel.classList.toggle('hidden', mode !== 'report');
   document.getElementById('article-list').classList.toggle('hidden', mode !== 'list');
   setActiveNav(mode);
   if (mode === 'list') {
     selectedArticleId = null;
+  }
+  if (mode === 'wordbook') {
+    renderWordBookPage();
   }
   if (mode === 'report') showReport();
 }
@@ -170,6 +206,8 @@ function handlePageNav(event) {
       return;
     }
     startReview(selectedArticleId);
+  } else if (page === 'wordbook') {
+    showSection('wordbook');
   } else if (page === 'report') {
     showSection('report');
   }
@@ -251,15 +289,28 @@ function registerWordMistakes(sentence, answer, article) {
     let entry = wordBook.find(item => item.word.toLowerCase() === key);
     if (!entry) {
       entry = {
+        id: generateId(),
         word,
         count: 0,
         lastSeen: timestamp,
         examples: [],
+        translation: '',
+        difficulty: '',
+        source: article.title || article.source || '',
+        tags: [],
+        masteryScore: 0,
+        reviewCount: 0,
+        audioId: null,
+        audioName: '',
+        history: [],
       };
       wordBook.push(entry);
     }
     entry.count += 1;
     entry.lastSeen = timestamp;
+    if (!entry.source) {
+      entry.source = article.title || article.source || entry.source || '';
+    }
     const example = `${article.title}：${sentence.text}`;
     if (!entry.examples.includes(example)) {
       entry.examples.unshift(example);
@@ -536,6 +587,27 @@ function startReview(articleId, focusSentenceId = null) {
 
 async function renderReviewItem() {
   if (!currentReview) return;
+  if (currentReview.type === 'word') {
+    const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
+    if (!word) return;
+    elements.reviewTitle.textContent = `错词复习：${word.word}`;
+    elements.reviewSubtitle.textContent = word.source ? `来源：${word.source}` : '';
+    elements.quizIndex.textContent = currentReview.index + 1;
+    elements.quizTotal.textContent = currentReview.wordIds.length;
+    elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
+    elements.sentenceNumber.textContent = `词语 ${currentReview.index + 1}`;
+    elements.reviewSentenceDifficultyLabel.textContent = word.difficulty ? `难度：${word.difficulty}` : '难度：未设置';
+    elements.reviewSentenceTagsLabel.textContent = word.translation ? `中文：${word.translation}` : (word.examples.length ? `例句：${word.examples[0]}` : '暂无中文说明');
+    elements.dictationInput.value = '';
+    elements.dictationInput.placeholder = '请拼写这个错词的荷兰语形式';
+    showFeedback('', '');
+    clearReviewSummary();
+    const audioUrl = await getAudioUrl(word.audioId);
+    reviewAudio.src = audioUrl;
+    reviewAudio.pause();
+    return;
+  }
+
   const article = findArticle(currentReview.articleId);
   const sentence = article.sentences.find(s => s.id === currentReview.sentenceIds[currentReview.index]);
   if (!sentence) return;
@@ -549,6 +621,7 @@ async function renderReviewItem() {
   elements.reviewSentenceDifficultyLabel.textContent = sentence.difficulty ? `难度：${sentence.difficulty}` : '难度：未设置';
   elements.reviewSentenceTagsLabel.textContent = sentence.tags.length ? `标签：${sentence.tags.join('，')}` : '标签：无';
   elements.dictationInput.value = '';
+  elements.dictationInput.placeholder = '听写后在这里输入荷兰语句子';
   showFeedback('', '');
   clearReviewSummary();
   const audioUrl = await getAudioUrl(sentence.audioId);
@@ -558,6 +631,18 @@ async function renderReviewItem() {
 
 async function playCurrentSentenceAudio() {
   if (!currentReview) return;
+  if (currentReview.type === 'word') {
+    const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
+    if (!word || !word.audioId) {
+      alert('当前词条尚未上传音频。');
+      return;
+    }
+    const audioUrl = await getAudioUrl(word.audioId);
+    reviewAudio.src = audioUrl;
+    reviewAudio.play();
+    return;
+  }
+
   const article = findArticle(currentReview.articleId);
   const sentence = article.sentences.find(s => s.id === currentReview.sentenceIds[currentReview.index]);
   if (!sentence || !sentence.audioId) {
@@ -571,10 +656,16 @@ async function playCurrentSentenceAudio() {
 
 function revealSentenceAnswer() {
   if (!currentReview) return;
+  if (currentReview.type === 'word') {
+    const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
+    if (!word) return;
+    const translationText = word.translation ? `\n中文：${word.translation}` : '';
+    showFeedback(`正确文本：${word.word}${translationText}`, 'info');
+    return;
+  }
   const article = findArticle(currentReview.articleId);
   const sentence = article.sentences.find(s => s.id === currentReview.sentenceIds[currentReview.index]);
-  const translationText = sentence.translation ? `
-翻译：${sentence.translation}` : '';
+  const translationText = sentence.translation ? `\n翻译：${sentence.translation}` : '';
   showFeedback(`正确文本：${sentence.text}${translationText}`, 'info');
 }
 
@@ -586,7 +677,44 @@ function handleSubmitAnswer() {
 
   const answer = elements.dictationInput.value.trim();
   if (!answer) {
-    showFeedback('请输入你的听写内容，然后提交。', 'warning');
+    showFeedback(currentReview.type === 'word' ? '请输入你的拼写内容，然后提交。' : '请输入你的听写内容，然后提交。', 'warning');
+    return;
+  }
+
+  if (currentReview.type === 'word') {
+    const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
+    if (!word) return;
+    const normalizedTarget = normalizeText(word.word);
+    const normalizedAnswer = normalizeText(answer);
+    const score = calculateScore(normalizedTarget, normalizedAnswer);
+    word.reviewCount = (word.reviewCount || 0) + 1;
+    word.lastReviewed = new Date().toISOString();
+    if (score < 100) {
+      word.count += 1;
+      word.lastSeen = new Date().toISOString();
+    }
+    word.masteryScore = Math.min(100, (word.masteryScore || 0) + score * 0.25);
+    word.history = word.history || [];
+    word.history.unshift({
+      timestamp: new Date().toISOString(),
+      answer,
+      score,
+      correctText: word.word,
+    });
+    saveWordBook();
+
+    currentReview.doneIds.add(word.id);
+    currentReview.sessionScores.push({
+      sentence: word.word,
+      score,
+      answer,
+      correctText: word.word,
+    });
+
+    showFeedback(`得分：${score}% 。已累计复习 ${word.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
+    if (currentReview.doneIds.size >= currentReview.wordIds.length) {
+      completeReview();
+    }
     return;
   }
 
@@ -622,7 +750,7 @@ function handleSubmitAnswer() {
   elements.quizMastery.textContent = `${Math.round(article.masteryScore)}%`;
 
   if (currentReview.doneIds.size >= currentReview.sentenceIds.length) {
-    completeReview(article);
+    completeReview();
   }
 }
 
@@ -665,37 +793,69 @@ function calculateArticleMastery(article) {
   return sum / article.sentences.length;
 }
 
+function getWrongSentenceSummaries() {
+  const wrong = [];
+  articles.forEach(article => {
+    (article.sentences || []).forEach(sentence => {
+      const wrongAttempts = (sentence.history || []).filter(h => h.score < 100).length;
+      if (wrongAttempts > 0) {
+        wrong.push({
+          articleTitle: article.title,
+          source: article.source || '',
+          text: sentence.text,
+          score: sentence.masteryScore || 0,
+          wrongAttempts,
+          lastReviewed: sentence.lastReviewed || '',
+        });
+      }
+    });
+  });
+  return wrong.sort((a, b) => b.wrongAttempts - a.wrongAttempts || a.score - b.score || new Date(b.lastReviewed) - new Date(a.lastReviewed));
+}
+
 function showReport() {
   const totalArticles = articles.length;
   const totalSentences = articles.reduce((sum, a) => sum + (a.sentences?.length || 0), 0);
   let totalScore = 0;
   let scoredCount = 0;
-  const recent = [];
   articles.forEach(article => {
-    article.sentences.forEach(sentence => {
+    (article.sentences || []).forEach(sentence => {
       if (typeof sentence.masteryScore === 'number') {
         totalScore += sentence.masteryScore;
         scoredCount += 1;
       }
-      (sentence.history || []).forEach(h => {
-        recent.push({
-          articleTitle: article.title,
-          sentence: sentence.text,
-          timestamp: h.timestamp,
-          score: h.score,
-        });
-      });
     });
   });
   const overall = scoredCount ? Math.round(totalScore / scoredCount) : 0;
+  const wrongSentences = getWrongSentenceSummaries();
+
   if (elements.reportTotalArticles) elements.reportTotalArticles.textContent = totalArticles;
   if (elements.reportTotalSentences) elements.reportTotalSentences.textContent = totalSentences;
   if (elements.reportOverallMastery) elements.reportOverallMastery.textContent = `${overall}%`;
   if (elements.reportTotalWrongWords) elements.reportTotalWrongWords.textContent = wordBook.length;
+  if (elements.reportTotalWrongSentences) elements.reportTotalWrongSentences.textContent = wrongSentences.length;
 
-  recent.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  const recentList = recent.slice(0, 10).map(r => `<div class="report-row">${new Date(r.timestamp).toLocaleString()} · <strong>${escapeHtml(r.articleTitle)}</strong> · ${escapeHtml(r.sentence)} · 得分：${r.score}%</div>`).join('');
-  if (elements.reportRecent) elements.reportRecent.innerHTML = recentList || '<div class="empty-state">暂无复习记录。</div>';
+  if (elements.reportSummary) {
+    const topWords = wordBook.slice().sort((a, b) => b.count - a.count).slice(0, 5);
+    const topSentences = wrongSentences.slice(0, 5);
+    const summaryHtml = `
+      <div class="report-summary-grid">
+        <div>错词数：<strong>${wordBook.length}</strong></div>
+        <div>错句数：<strong>${wrongSentences.length}</strong></div>
+        <div>总体熟练度：<strong>${overall}%</strong></div>
+        <div>建议优先复习：<strong>${topWords.length ? escapeHtml(topWords[0].word) : '暂无'}</strong></div>
+      </div>
+      <div class="report-summary-block">
+        <h4>重点错词</h4>
+        ${topWords.length ? topWords.map(item => `<div>${escapeHtml(item.word)} · 错题：${item.count} 次 · 熟练度：${Math.round(item.masteryScore || 0)}%</div>`).join('') : '<div class="empty-state">暂无错词。</div>'}
+      </div>
+      <div class="report-summary-block">
+        <h4>重点错句</h4>
+        ${topSentences.length ? topSentences.map(item => `<div>${escapeHtml(item.articleTitle)}：${escapeHtml(item.text)} · 熟练度：${Math.round(item.score)}%</div>`).join('') : '<div class="empty-state">暂无错句。</div>'}
+      </div>
+    `;
+    elements.reportSummary.innerHTML = summaryHtml;
+  }
 
   if (elements.reportWordBook) {
     if (!wordBook.length) {
@@ -704,12 +864,174 @@ function showReport() {
       elements.reportWordBook.innerHTML = wordBook.slice(0, 12).map(item => `
         <div class="word-card">
           <div class="word-card-title">${escapeHtml(item.word)}</div>
-          <div class="word-card-meta">错题次数：${item.count} · 最近：${new Date(item.lastSeen).toLocaleString()}</div>
+          <div class="word-card-meta">错题次数：${item.count} · 熟练度：${Math.round(item.masteryScore || 0)}% · 最近：${new Date(item.lastSeen).toLocaleString()}</div>
           <div class="word-card-examples">${item.examples.map(ex => `<div class="word-example">${escapeHtml(ex)}</div>`).join('')}</div>
         </div>
       `).join('');
     }
   }
+}
+
+function openWordBookEditPanel(id) {
+  const entry = wordBook.find(item => String(item.id) === String(id));
+  if (!entry || !elements.wordbookEditPanel) return;
+  selectedWordBookId = String(entry.id);
+  elements.wordbookEditWord.value = entry.word;
+  elements.wordbookEditTranslation.value = entry.translation || '';
+  elements.wordbookEditDifficulty.value = entry.difficulty || '';
+  elements.wordbookEditSource.value = entry.source || '';
+  if (elements.wordbookEditTags) {
+    elements.wordbookEditTags.value = Array.isArray(entry.tags) ? entry.tags.join(', ') : '';
+  }
+  elements.wordbookEditAudioInfo.textContent = entry.audioName ? `当前音频：${entry.audioName}` : '当前无音频。';
+  elements.wordbookEditPanel.classList.remove('hidden');
+}
+
+function closeWordBookEditPanel() {
+  if (!elements.wordbookEditPanel) return;
+  selectedWordBookId = null;
+  elements.wordbookEditPanel.classList.add('hidden');
+  if (elements.wordbookEditForm) elements.wordbookEditForm.reset();
+  if (elements.wordbookEditAudioInfo) elements.wordbookEditAudioInfo.textContent = '如果不修改音频则保持当前音频。';
+}
+
+async function handleWordBookEditSubmit(event) {
+  event.preventDefault();
+  if (!selectedWordBookId) return;
+  const entry = wordBook.find(item => String(item.id) === String(selectedWordBookId));
+  if (!entry) return;
+  entry.translation = elements.wordbookEditTranslation.value.trim();
+  entry.difficulty = elements.wordbookEditDifficulty.value.trim();
+  entry.source = elements.wordbookEditSource.value.trim();
+  if (elements.wordbookEditTags) {
+    entry.tags = elements.wordbookEditTags.value
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(Boolean);
+  }
+  const file = elements.wordbookEditAudio.files[0];
+  if (file) {
+    try {
+      const savedId = await saveAudioBlob(entry.audioId, file);
+      entry.audioId = savedId;
+      entry.audioName = file.name || entry.audioName || '';
+    } catch (err) {
+      showFeedback(`音频保存失败：${err.message}`, 'danger');
+      return;
+    }
+  }
+  saveWordBook();
+  renderWordBookPage();
+  closeWordBookEditPanel();
+  showFeedback('错词已更新。', 'success');
+}
+
+function deleteWordBookEntry(id) {
+  if (!confirm('确认要从错题本中删除这个单词吗？')) return;
+  const index = wordBook.findIndex(item => String(item.id) === String(id));
+  if (index === -1) return;
+  wordBook.splice(index, 1);
+  saveWordBook();
+  renderWordBookPage();
+  showFeedback('已删除错词条目。', 'success');
+}
+
+function renderWordBookPage() {
+  if (!elements.wordbookPanel) return;
+  closeWordBookEditPanel();
+  const wrongSentences = getWrongSentenceSummaries();
+  const totalWords = wordBook.length;
+  const overall = articles.reduce((sum, article) => sum + (article.sentences?.reduce((ss, sentence) => ss + (sentence.masteryScore || 0), 0) || 0), 0);
+  const countScores = articles.reduce((sum, article) => sum + (article.sentences?.length || 0), 0);
+  const overallMastery = countScores ? Math.round(overall / countScores) : 0;
+  const pending = wordBook.filter(item => (item.masteryScore || 0) < 90).length;
+
+  if (elements.wordbookTotalWords) elements.wordbookTotalWords.textContent = totalWords;
+  if (elements.wordbookTotalSentences) elements.wordbookTotalSentences.textContent = wrongSentences.length;
+  if (elements.wordbookOverallMastery) elements.wordbookOverallMastery.textContent = `${overallMastery}%`;
+  if (elements.wordbookPendingReview) elements.wordbookPendingReview.textContent = pending;
+
+  if (!elements.wordbookList) return;
+  if (!wordBook.length) {
+    elements.wordbookList.innerHTML = '<div class="empty-state">当前错题本为空。</div>';
+    return;
+  }
+
+  elements.wordbookList.innerHTML = wordBook.slice().sort((a, b) => b.count - a.count).map(item => `
+    <div class="wordbook-card" data-word-id="${item.id}">
+      <div class="wordbook-card-header">
+        <div class="wordbook-word">${escapeHtml(item.word)}</div>
+        <div class="wordbook-mastery">熟练度：${Math.round(item.masteryScore || 0)}%</div>
+      </div>
+      <div class="wordbook-meta">难度：${escapeHtml(item.difficulty || '未设置')} · 错题次数：${item.count} · 来源：${escapeHtml(item.source || '未知')}</div>
+      ${item.tags && item.tags.length ? `<div class="wordbook-tags">标签：${escapeHtml(item.tags.join(', '))}</div>` : ''}
+      <div class="wordbook-translation">中文：${escapeHtml(item.translation || '暂无说明')}</div>
+      <div class="wordbook-actions">
+        ${item.audioId ? '<button type="button" class="btn btn-small btn-secondary play-word-audio-btn">播放</button>' : ''}
+        <button type="button" class="btn btn-small btn-primary wordbook-review-btn">复习</button>
+        <button type="button" class="btn btn-small btn-secondary wordbook-edit-btn">编辑</button>
+        <button type="button" class="btn btn-small btn-danger wordbook-delete-btn">删除</button>
+      </div>
+    </div>
+  `).join('');
+
+}
+
+function handleWordbookListClick(event) {
+  const card = event.target.closest('.wordbook-card');
+  if (!card) return;
+  const id = card.dataset.wordId;
+  if (!id) return;
+
+  if (event.target.closest('.wordbook-review-btn')) {
+    startWordReview(id);
+    return;
+  }
+
+  if (event.target.closest('.wordbook-edit-btn')) {
+    openWordBookEditPanel(id);
+    return;
+  }
+
+  if (event.target.closest('.wordbook-delete-btn')) {
+    deleteWordBookEntry(id);
+    return;
+  }
+
+  if (event.target.closest('.play-word-audio-btn')) {
+    const entry = wordBook.find(item => String(item.id) === String(id));
+    if (!entry || !entry.audioId) return;
+    getAudioUrl(entry.audioId).then(url => new Audio(url).play()).catch(() => {});
+    return;
+  }
+
+  if (event.target.closest('.wordbook-card')) {
+    openWordBookEditPanel(id);
+    return;
+  }
+}
+
+function startWordReview(wordId = null) {
+  const ids = wordId ? [wordId] : wordBook.map(item => item.id);
+  if (!ids.length) {
+    alert('错题本当前没有错词可复习。');
+    return;
+  }
+  currentReview = {
+    type: 'word',
+    wordIds: ids,
+    index: 0,
+    doneIds: new Set(),
+    sessionScores: [],
+  };
+  showSection('review');
+  renderReviewItem();
+}
+
+function resetWordBookEditForm() {
+  if (!elements.wordbookEditForm) return;
+  elements.wordbookEditForm.reset();
+  elements.wordbookEditAudioInfo.textContent = '如果不修改音频则保持当前音频。';
 }
 
 function showFeedback(message, type = 'info') {
@@ -722,10 +1044,10 @@ function showFeedback(message, type = 'info') {
   elements.feedback.className = `feedback ${type === 'success' ? 'success' : type === 'warning' ? 'warning' : type === 'danger' ? 'error' : ''}`;
 }
 
-function completeReview(article) {
+function completeReview() {
   if (!currentReview) return;
   const summary = {
-    total: currentReview.sentenceIds.length,
+    total: currentReview.type === 'word' ? currentReview.wordIds.length : currentReview.sentenceIds.length,
     scores: currentReview.sessionScores.map(item => ({ sentence: item.sentence, score: item.score })),
     average: currentReview.sessionScores.length
       ? Math.round(currentReview.sessionScores.reduce((sum, item) => sum + item.score, 0) / currentReview.sessionScores.length)

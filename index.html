@@ -25,6 +25,7 @@
         <button class="btn btn-secondary nav-btn" data-page="create">创建文章</button>
         <button class="btn btn-secondary nav-btn" data-page="edit">文章编辑</button>
         <button class="btn btn-secondary nav-btn" data-page="review">复习页面</button>
+        <button class="btn btn-secondary nav-btn" data-page="wordbook">错题本</button>
         <button class="btn btn-secondary nav-btn" data-page="report">报告页面</button>
         <button class="btn btn-secondary nav-btn" data-page="backup">数据备份</button>
       </nav>
@@ -116,6 +117,73 @@
       </div>
     </section>
 
+    <section class="card hidden" id="wordbook-panel">
+      <h2>错题本</h2>
+      <div class="report-grid">
+        <div class="report-metric">
+          <h3>错词数</h3>
+          <div id="wordbook-total-words">0</div>
+        </div>
+        <div class="report-metric">
+          <h3>错句数</h3>
+          <div id="wordbook-total-sentences">0</div>
+        </div>
+        <div class="report-metric">
+          <h3>总熟练度</h3>
+          <div id="wordbook-overall-mastery">0%</div>
+        </div>
+        <div class="report-metric">
+          <h3>待复习</h3>
+          <div id="wordbook-pending-review">0</div>
+        </div>
+      </div>
+      <div class="field-row">
+        <button id="wordbook-review-all" class="btn btn-primary">批量复习错题本</button>
+      </div>
+      <div class="report-section">
+        <div class="report-section-header">
+          <h3>错词列表</h3>
+          <p>你可以对错词补充中文、设置难度、上传音频，并直接进入拼写复习。</p>
+        </div>
+        <div id="wordbook-list" class="wordbook-list"></div>
+      </div>
+      <section id="wordbook-edit-panel" class="card hidden wordbook-edit-panel">
+        <h3>编辑错词</h3>
+        <form id="wordbook-edit-form">
+          <div class="field-row">
+            <label>错词</label>
+            <input type="text" id="wordbook-edit-word" disabled />
+          </div>
+          <div class="field-row">
+            <label>中文说明</label>
+            <textarea id="wordbook-edit-translation" rows="2" placeholder="例如：税务、缴税"></textarea>
+          </div>
+          <div class="field-row two-column">
+            <div>
+              <label>难度</label>
+              <input type="text" id="wordbook-edit-difficulty" placeholder="例如：B1, 高频词" />
+            </div>
+            <div>
+              <label>来源文章</label>
+              <input type="text" id="wordbook-edit-source" placeholder="例如：文章标题或来源" />
+            </div>
+          </div>
+          <div class="field-row">
+            <label>标签</label>
+            <input type="text" id="wordbook-edit-tags" placeholder="逗号分隔的标签，例如：高频, 商务" />
+          </div>
+          <div class="field-row">
+            <label>上传音频</label>
+            <input type="file" id="wordbook-edit-audio" accept="audio/*" />
+            <div id="wordbook-edit-audio-info" class="audio-info">如果不修改音频则保持当前音频。</div>
+          </div>
+          <div class="sentence-actions">
+            <button type="submit" class="btn btn-primary">保存错词</button>
+            <button type="button" id="wordbook-edit-cancel" class="btn btn-secondary">取消</button>
+          </div>
+        </form>
+      </section>
+    </section>
     <section class="card hidden" id="backup-panel">
       <h2>数据备份与存储说明</h2>
       <p>文章与句子数据会保存在本地浏览器的 <strong>localStorage</strong> 中，句子音频文件保存在浏览器的 <strong>IndexedDB</strong> 中。刷新、关闭浏览器后数据仍会保留，但如果浏览器缓存被清除或换设备，数据会丢失。</p>
@@ -148,21 +216,25 @@
           <h3>错词数</h3>
           <div id="report-total-wrong-words">0</div>
         </div>
+        <div class="report-metric">
+          <h3>错句数</h3>
+          <div id="report-total-wrong-sentences">0</div>
+        </div>
       </div>
 
       <div class="report-section">
         <div class="report-section-header">
-          <h3>错词本</h3>
-          <p>复习中拼错的词会自动收录，帮助你复习前后形态，并记录典型句子。</p>
+          <h3>学习进度摘要</h3>
+          <p>本报告展示总体熟练度、错题数量和优先复习方向，无需详细日志。</p>
+        </div>
+        <div id="report-summary" class="report-summary"></div>
+      </div>
+
+      <div class="report-section">
+        <div class="report-section-header">
+          <h3>错词示例</h3>
         </div>
         <div id="report-word-book" class="report-word-book"></div>
-      </div>
-
-      <div class="report-section">
-        <div class="report-section-header">
-          <h3>最近复习记录</h3>
-        </div>
-        <div id="report-recent" class="report-recent"></div>
       </div>
     </section>
 
