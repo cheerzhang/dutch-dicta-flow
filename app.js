@@ -139,6 +139,9 @@ function bindEvents() {
   if (elements.showAnswer) {
     elements.showAnswer.addEventListener('click', revealSentenceAnswer);
   }
+  if (elements.reviewSummary) {
+    elements.reviewSummary.addEventListener('click', handleReviewSummaryClick);
+  }
   if (elements.submitAnswer) {
     elements.submitAnswer.addEventListener('click', handleSubmitAnswer);
   }
@@ -277,6 +280,59 @@ function getMistypedWords(target, answer) {
     }
   }
   return Array.from(new Set(wrong));
+}
+
+function getMistypedWordPairs(target, answer) {
+  const targetWords = tokenizeWords(target);
+  const answerWords = tokenizeWords(answer);
+  const pairs = [];
+  const length = Math.max(targetWords.length, answerWords.length);
+  for (let i = 0; i < length; i += 1) {
+    const expected = targetWords[i] || '';
+    const actual = answerWords[i] || '';
+    if (expected && expected !== actual) {
+      pairs.push({ expected, actual: actual || '（缺失）' });
+    }
+  }
+  return pairs;
+}
+
+function recordWrongWordEntry(word, sentence, article) {
+  const key = String(word).toLowerCase();
+  const timestamp = new Date().toISOString();
+  let entry = wordBook.find(item => String(item.word).toLowerCase() === key);
+  if (!entry) {
+    entry = {
+      id: generateId(),
+      word,
+      count: 1,
+      lastSeen: timestamp,
+      examples: [`${article.title}：${sentence.text}`],
+      translation: '',
+      difficulty: sentence.difficulty || '',
+      source: article.title || article.source || '',
+      tags: sentence.tags || [],
+      masteryScore: 0,
+      reviewCount: 0,
+      audioId: null,
+      audioName: '',
+      history: [],
+    };
+    wordBook.push(entry);
+  } else {
+    entry.count += 1;
+    entry.lastSeen = timestamp;
+    if (!entry.source) {
+      entry.source = article.title || article.source || entry.source || '';
+    }
+    const example = `${article.title}：${sentence.text}`;
+    if (!entry.examples.includes(example)) {
+      entry.examples.unshift(example);
+      if (entry.examples.length > 3) entry.examples.length = 3;
+    }
+  }
+  saveWordBook();
+  return entry;
 }
 
 function registerWordMistakes(sentence, answer, article) {
@@ -732,12 +788,13 @@ function handleSubmitAnswer() {
     correctText: sentence.text,
   });
 
-  registerWordMistakes(sentence, answer, article);
+  const wrongPairs = getMistypedWordPairs(sentence.text, answer);
   article.reviewCount += 1;
   article.masteryScore = calculateArticleMastery(article);
   article.updatedAt = new Date().toISOString();
   saveArticles();
 
+  currentReview.lastWrongPairs = wrongPairs;
   currentReview.doneIds.add(sentence.id);
   currentReview.sessionScores.push({
     sentence: sentence.text,
@@ -748,6 +805,7 @@ function handleSubmitAnswer() {
 
   showFeedback(`得分：${score}% 。已累计复习 ${sentence.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
   elements.quizMastery.textContent = `${Math.round(article.masteryScore)}%`;
+  renderSentenceMistakeSummary(sentence, article, currentReview.lastWrongPairs || []);
 
   if (currentReview.doneIds.size >= currentReview.sentenceIds.length) {
     completeReview();
@@ -1092,6 +1150,53 @@ function renderReviewSummary(summary) {
     </div>
   `;
   elements.reviewSummary.classList.remove('hidden');
+}
+
+function renderSentenceMistakeSummary(sentence, article, wrongPairs) {
+  if (!elements.reviewSummary) return;
+  const mistakesHtml = wrongPairs.length
+    ? wrongPairs.map((pair, index) => `
+      <div class="review-mistake-row">
+        <div class="review-mistake-text">
+          <span class="review-mistake-wrong">${escapeHtml(pair.actual)}</span>
+          <span class="review-mistake-arrow">→</span>
+          <span class="review-mistake-correct">${escapeHtml(pair.expected)}</span>
+        </div>
+        <button type="button" class="btn btn-small btn-secondary record-mistake-btn" data-word="${escapeHtml(pair.expected)}" data-sentence-id="${sentence.id}" data-article-id="${article.id}">记录</button>
+      </div>
+    `).join('')
+    : '<div class="review-no-mistakes">本句未识别出错词。</div>';
+
+  elements.reviewSummary.innerHTML = `
+    <div class="review-summary-header">
+      <h3>本句错词</h3>
+      <div class="review-summary-score">得分：${calculateScore(normalizeText(sentence.text), normalizeText(elements.dictationInput.value.trim()))}%</div>
+    </div>
+    <div class="review-summary-body">
+      ${mistakesHtml}
+      <div class="review-summary-note">未点击“记录”的错词将不会入错题本。</div>
+    </div>
+  `;
+  elements.reviewSummary.classList.remove('hidden');
+}
+
+function handleReviewSummaryClick(event) {
+  const button = event.target.closest('.record-mistake-btn');
+  if (!button) return;
+  const word = button.dataset.word;
+  const sentenceId = button.dataset.sentenceId;
+  const articleId = button.dataset.articleId;
+  if (!word || !sentenceId || !articleId) return;
+
+  const article = findArticle(articleId);
+  if (!article) return;
+  const sentence = article.sentences.find(s => s.id === sentenceId);
+  if (!sentence) return;
+
+  recordWrongWordEntry(word, sentence, article);
+  button.textContent = '已记录';
+  button.disabled = true;
+  showFeedback(`已记录错词：${word}`, 'success');
 }
 
 function splitTags(value) {

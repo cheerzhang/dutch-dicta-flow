@@ -562,6 +562,52 @@ body {
   padding: 12px 14px;
 }
 
+.review-mistake-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.review-mistake-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.review-mistake-wrong {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.review-mistake-arrow {
+  color: rgba(100, 116, 139, 0.8);
+}
+
+.review-mistake-correct {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.review-summary-note {
+  color: var(--muted);
+  font-size: 0.95rem;
+  padding: 8px 12px;
+  border-left: 3px solid var(--primary);
+  background: rgba(59, 130, 246, 0.05);
+  border-radius: 10px;
+}
+
+.review-no-mistakes {
+  color: var(--success);
+  font-weight: 600;
+}
+
 .review-word-book {
   display: grid;
   gap: 8px;
