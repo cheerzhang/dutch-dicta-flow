@@ -565,17 +565,46 @@ function getAudioUrl(audioId) {
       const key = entry.word.trim().toLowerCase();
       let existing = wordBook.find(item => item.word.trim().toLowerCase() === key);
       if (!existing) {
-        existing = { word: entry.word, count: 0, lastSeen: entry.lastSeen || new Date().toISOString(), examples: [] };
+        existing = {
+          id: entry.id || generateId(),
+          word: entry.word,
+          translation: entry.translation || '',
+          difficulty: entry.difficulty || '',
+          source: entry.source || '',
+          tags: Array.isArray(entry.tags) ? entry.tags : (entry.tags ? [entry.tags] : []),
+          count: entry.count || 0,
+          lastSeen: entry.lastSeen || new Date().toISOString(),
+          examples: Array.isArray(entry.examples) ? entry.examples.slice(0, 3) : [],
+          masteryScore: typeof entry.masteryScore === 'number' ? entry.masteryScore : (entry.score || 0),
+          reviewCount: typeof entry.reviewCount === 'number' ? entry.reviewCount : 0,
+          audioId: entry.audioId || null,
+          audioName: entry.audioName || '',
+          history: Array.isArray(entry.history) ? entry.history : [],
+        };
         wordBook.push(existing);
+        return;
       }
-      existing.count = Math.max(existing.count, entry.count || 0);
+
+      if (entry.id && !existing.id) existing.id = entry.id;
+      existing.translation = entry.translation || existing.translation || '';
+      existing.difficulty = entry.difficulty || existing.difficulty || '';
+      existing.source = entry.source || existing.source || '';
+      existing.tags = Array.isArray(entry.tags)
+        ? Array.from(new Set([...(existing.tags || []), ...entry.tags]))
+        : existing.tags;
+      existing.count = Math.max(existing.count || 0, entry.count || 0);
       existing.lastSeen = existing.lastSeen > (entry.lastSeen || existing.lastSeen) ? existing.lastSeen : (entry.lastSeen || existing.lastSeen);
+      existing.masteryScore = typeof entry.masteryScore === 'number' ? Math.max(existing.masteryScore || 0, entry.masteryScore) : existing.masteryScore;
+      existing.reviewCount = Math.max(existing.reviewCount || 0, entry.reviewCount || 0);
+      existing.audioId = entry.audioId || existing.audioId || null;
+      existing.audioName = entry.audioName || existing.audioName || '';
+      existing.history = Array.isArray(entry.history) ? Array.from(new Set([...(existing.history || []), ...entry.history])) : existing.history;
       (entry.examples || []).forEach(example => {
         if (!existing.examples.includes(example)) {
           existing.examples.unshift(example);
         }
       });
-      if (existing.examples.length > 3) existing.examples.length = 3;
+      if ((existing.examples || []).length > 3) existing.examples.length = 3;
     });
     wordBook.sort((a, b) => b.count - a.count || new Date(b.lastSeen) - new Date(a.lastSeen));
     saveWordBook();
