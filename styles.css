@@ -383,6 +383,29 @@ body {
   margin-top: 22px;
 }
 
+.report-inner-section {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.05);
+}
+
+.article-stat,
+.word-card {
+  margin-bottom: 14px;
+}
+
+.article-stat-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.article-stat-meta {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .report-section-header {
   display: flex;
   flex-direction: column;
@@ -548,6 +571,49 @@ body {
 .review-summary-body {
   display: grid;
   gap: 12px;
+}
+
+.review-sentence-compare {
+  display: grid;
+  gap: 10px;
+}
+
+.review-sentence-row {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 1);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.review-sentence-original {
+  background: rgba(255, 247, 237, 1);
+}
+
+.review-sentence-user {
+  background: rgba(237, 249, 255, 1);
+}
+
+.review-sentence-label {
+  font-size: 0.92rem;
+  color: rgba(100, 116, 139, 0.95);
+  font-weight: 600;
+}
+
+.review-sentence-text {
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.highlight-error {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  font-weight: 600;
+  padding: 2px 4px;
+  border-radius: 3px;
 }
 
 .review-summary-list {

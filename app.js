@@ -286,14 +286,53 @@ function getMistypedWordPairs(target, answer) {
   const targetWords = tokenizeWords(target);
   const answerWords = tokenizeWords(answer);
   const pairs = [];
-  const length = Math.max(targetWords.length, answerWords.length);
-  for (let i = 0; i < length; i += 1) {
-    const expected = targetWords[i] || '';
-    const actual = answerWords[i] || '';
-    if (expected && expected !== actual) {
-      pairs.push({ expected, actual: actual || '（缺失）' });
+  const answerUsed = new Set();
+
+  for (let i = 0; i < targetWords.length; i++) {
+    const targetWord = targetWords[i];
+    if (!targetWord) continue;
+
+    let matchIdx = -1;
+    let exactMatch = false;
+
+    // 第一步：在周围范围内找完全相同的单词（避免级联错位）
+    for (let j = Math.max(0, i - 1); j < Math.min(answerWords.length, i + 3); j++) {
+      if (!answerUsed.has(j) && answerWords[j] === targetWord) {
+        matchIdx = j;
+        exactMatch = true;
+        break;
+      }
+    }
+
+    // 第二步：如果没找到完全相同的，找最相近的单词
+    if (matchIdx === -1) {
+      let bestScore = -1;
+      for (let j = 0; j < answerWords.length; j++) {
+        if (answerUsed.has(j)) continue;
+        const dist = levenshteinDistance(targetWord, answerWords[j]);
+        const posDist = Math.abs(i - j);
+        // 综合考虑编辑距离和位置距离
+        const score = 100 - dist * 10 - posDist * 5;
+        if (score > bestScore && score > 50) {
+          bestScore = score;
+          matchIdx = j;
+        }
+      }
+    }
+
+    // 标记已使用
+    if (matchIdx >= 0) {
+      answerUsed.add(matchIdx);
+      const answerWord = answerWords[matchIdx];
+      if (!exactMatch && targetWord !== answerWord) {
+        pairs.push({ expected: targetWord, actual: answerWord });
+      }
+    } else {
+      // 未找到匹配，表示漏写
+      pairs.push({ expected: targetWord, actual: '（缺失）' });
     }
   }
+
   return pairs;
 }
 
@@ -756,10 +795,6 @@ function revealSentenceAnswer() {
 
 function handleSubmitAnswer() {
   if (!currentReview) return;
-  const article = findArticle(currentReview.articleId);
-  const sentence = article.sentences.find(s => s.id === currentReview.sentenceIds[currentReview.index]);
-  if (!sentence) return;
-
   const answer = elements.dictationInput.value.trim();
   if (!answer) {
     showFeedback(currentReview.type === 'word' ? '请输入你的拼写内容，然后提交。' : '请输入你的听写内容，然后提交。', 'warning');
@@ -797,19 +832,26 @@ function handleSubmitAnswer() {
     });
 
     showFeedback(`得分：${score}% 。已累计复习 ${word.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
+    elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
+    renderWordReviewResult(word, score, answer);
     if (currentReview.doneIds.size >= currentReview.wordIds.length) {
       completeReview();
     }
     return;
   }
 
+  const article = findArticle(currentReview.articleId);
+  const sentence = article?.sentences.find(s => s.id === currentReview.sentenceIds[currentReview.index]);
+  if (!sentence) return;
+
   const normalizedTarget = normalizeText(sentence.text);
   const normalizedAnswer = normalizeText(answer);
   const score = calculateScore(normalizedTarget, normalizedAnswer);
   const lastScore = sentence.masteryScore || 0;
-  sentence.reviewCount += 1;
+  sentence.reviewCount = (sentence.reviewCount || 0) + 1;
   sentence.lastReviewed = new Date().toISOString();
   sentence.masteryScore = Math.min(100, lastScore + score * 0.25);
+  sentence.history = sentence.history || [];
   sentence.history.unshift({
     timestamp: new Date().toISOString(),
     answer,
@@ -818,10 +860,12 @@ function handleSubmitAnswer() {
   });
 
   const wrongPairs = getMistypedWordPairs(sentence.text, answer);
-  article.reviewCount += 1;
-  article.masteryScore = calculateArticleMastery(article);
-  article.updatedAt = new Date().toISOString();
-  saveArticles();
+  if (article) {
+    article.reviewCount = (article.reviewCount || 0) + 1;
+    article.masteryScore = calculateArticleMastery(article);
+    article.updatedAt = new Date().toISOString();
+    saveArticles();
+  }
 
   currentReview.lastWrongPairs = wrongPairs;
   currentReview.doneIds.add(sentence.id);
@@ -833,16 +877,66 @@ function handleSubmitAnswer() {
   });
 
   showFeedback(`得分：${score}% 。已累计复习 ${sentence.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
-  elements.quizMastery.textContent = `${Math.round(article.masteryScore)}%`;
-  renderSentenceMistakeSummary(sentence, article, currentReview.lastWrongPairs || []);
+  elements.quizMastery.textContent = `${Math.round(article?.masteryScore || 0)}%`;
+  renderSentenceMistakeSummary(sentence, article, currentReview.lastWrongPairs || [], answer);
 
   if (currentReview.doneIds.size >= currentReview.sentenceIds.length) {
     completeReview();
   }
 }
 
+function renderWordReviewResult(word, score, userAnswer) {
+  if (!elements.reviewSummary) return;
+  
+  elements.reviewSummary.innerHTML = `
+    <div class="review-summary-header">
+      <h3>拼写结果</h3>
+      <div class="review-summary-score">得分：${score}%</div>
+    </div>
+    <div class="review-summary-body">
+      <div class="review-sentence-compare">
+        <div class="review-sentence-row review-sentence-original">
+          <div class="review-sentence-label">正确拼法</div>
+          <div class="review-sentence-text">${escapeHtml(word.word)}</div>
+        </div>
+        <div class="review-sentence-row review-sentence-user">
+          <div class="review-sentence-label">你的拼写</div>
+          <div class="review-sentence-text">${escapeHtml(userAnswer)}</div>
+        </div>
+      </div>
+      ${word.translation ? `<div class="review-summary-note">中文：${escapeHtml(word.translation)}</div>` : ''}
+      <div class="review-summary-note">拼写记录已自动保存。</div>
+    </div>
+  `;
+  elements.reviewSummary.classList.remove('hidden');
+}
+
 function showNextSentence() {
   if (!currentReview) return;
+  
+  if (currentReview.type === 'word') {
+    const total = currentReview.wordIds.length;
+    let nextIndex = currentReview.index + 1;
+    while (nextIndex < total && currentReview.doneIds.has(currentReview.wordIds[nextIndex])) {
+      nextIndex += 1;
+    }
+
+    if (nextIndex >= total) {
+      const remaining = currentReview.wordIds.filter(id => !currentReview.doneIds.has(id));
+      if (remaining.length === 0) {
+        completeReview();
+        return;
+      }
+      nextIndex = currentReview.wordIds.findIndex(id => !currentReview.doneIds.has(id));
+    }
+
+    if (nextIndex >= 0 && nextIndex < total) {
+      currentReview.index = nextIndex;
+      renderReviewItem();
+    }
+    return;
+  }
+  
   const article = findArticle(currentReview.articleId);
   const total = currentReview.sentenceIds.length;
   let nextIndex = currentReview.index + 1;
@@ -925,16 +1019,27 @@ function showReport() {
   if (elements.reportSummary) {
     const topWords = wordBook.slice().sort((a, b) => b.count - a.count).slice(0, 5);
     const topSentences = wrongSentences.slice(0, 5);
+    const totalWordReviews = wordBook.reduce((sum, item) => sum + (item.reviewCount || 0), 0);
+    const totalWordCorrect = wordBook.reduce((sum, item) => sum + ((item.history || []).filter(h => h.score >= 90).length), 0);
+    const wordAccuracy = totalWordReviews ? Math.round((totalWordCorrect / totalWordReviews) * 100) : 0;
+    const totalArticleReviews = articles.reduce((sum, article) => sum + (article.reviewCount || 0), 0);
+    const totalSentenceCount = articles.reduce((sum, article) => sum + ((article.sentences || []).length), 0);
+    const totalSentenceCorrect = articles.reduce((sum, article) => sum + ((article.sentences || []).filter(s => (s.masteryScore || 0) >= 90).length), 0);
+    const sentenceAccuracy = totalSentenceCount ? Math.round((totalSentenceCorrect / totalSentenceCount) * 100) : 0;
     const summaryHtml = `
       <div class="report-summary-grid">
         <div>错词数：<strong>${wordBook.length}</strong></div>
         <div>错句数：<strong>${wrongSentences.length}</strong></div>
+        <div>单词复习次数：<strong>${totalWordReviews}</strong></div>
+        <div>句子复习次数：<strong>${totalArticleReviews}</strong></div>
+        <div>单词正确率：<strong>${wordAccuracy}%</strong></div>
+        <div>句子正确率：<strong>${sentenceAccuracy}%</strong></div>
         <div>总体熟练度：<strong>${overall}%</strong></div>
         <div>建议优先复习：<strong>${topWords.length ? escapeHtml(topWords[0].word) : '暂无'}</strong></div>
       </div>
       <div class="report-summary-block">
         <h4>重点错词</h4>
-        ${topWords.length ? topWords.map(item => `<div>${escapeHtml(item.word)} · 错题：${item.count} 次 · 熟练度：${Math.round(item.masteryScore || 0)}%</div>`).join('') : '<div class="empty-state">暂无错词。</div>'}
+        ${topWords.length ? topWords.map(item => `<div>${escapeHtml(item.word)} · 错题：${item.count} 次 · 复习：${item.reviewCount || 0} 次 · 熟练度：${Math.round(item.masteryScore || 0)}%</div>`).join('') : '<div class="empty-state">暂无错词。</div>'}
       </div>
       <div class="report-summary-block">
         <h4>重点错句</h4>
@@ -946,15 +1051,41 @@ function showReport() {
 
   if (elements.reportWordBook) {
     if (!wordBook.length) {
-      elements.reportWordBook.innerHTML = '<div class="empty-state">错词本为空。</div>';
+      elements.reportWordBook.innerHTML = '<div class="empty-state">错题本为空。</div>';
     } else {
-      elements.reportWordBook.innerHTML = wordBook.slice(0, 12).map(item => `
-        <div class="word-card">
-          <div class="word-card-title">${escapeHtml(item.word)}</div>
-          <div class="word-card-meta">错题次数：${item.count} · 熟练度：${Math.round(item.masteryScore || 0)}% · 最近：${new Date(item.lastSeen).toLocaleString()}</div>
-          <div class="word-card-examples">${item.examples.map(ex => `<div class="word-example">${escapeHtml(ex)}</div>`).join('')}</div>
+      const wordStats = wordBook.slice().sort((a, b) => b.count - a.count).slice(0, 12).map(item => {
+        const totalAttempts = item.reviewCount || 0;
+        const correctAttempts = (item.history || []).filter(h => h.score >= 90).length;
+        const accuracy = totalAttempts ? Math.round((correctAttempts / totalAttempts) * 100) : 0;
+        return `
+          <div class="word-card">
+            <div class="word-card-title">${escapeHtml(item.word)}</div>
+            <div class="word-card-meta">错题：${item.count} 次 · 复习：${totalAttempts} 次 · 正确率：${accuracy}% · 熟练度：${Math.round(item.masteryScore || 0)}%</div>
+            <div class="word-card-examples">${item.examples.map(ex => `<div class="word-example">${escapeHtml(ex)}</div>`).join('')}</div>
+          </div>
+        `;
+      }).join('');
+      const articleStats = articles.slice().sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0)).slice(0, 10).map(article => {
+        const totalSentences = article.sentences?.length || 0;
+        const correctSentences = (article.sentences || []).filter(s => (s.masteryScore || 0) >= 90).length;
+        const accuracy = totalSentences ? Math.round((correctSentences / totalSentences) * 100) : 0;
+        return `
+          <div class="article-stat">
+            <div class="article-stat-title">${escapeHtml(article.title)}</div>
+            <div class="article-stat-meta">句子：${totalSentences} · 复习：${article.reviewCount || 0} 次 · 正确率：${accuracy}% · 熟练度：${Math.round(article.masteryScore || 0)}%</div>
+          </div>
+        `;
+      }).join('');
+      elements.reportWordBook.innerHTML = `
+        <div class="report-section report-inner-section">
+          <h4>错词统计</h4>
+          ${wordStats}
         </div>
-      `).join('');
+        <div class="report-section report-inner-section">
+          <h4>文章统计</h4>
+          ${articleStats || '<div class="empty-state">暂无文章。</div>'}
+        </div>
+      `;
     }
   }
 }
@@ -1181,8 +1312,41 @@ function renderReviewSummary(summary) {
   elements.reviewSummary.classList.remove('hidden');
 }
 
-function renderSentenceMistakeSummary(sentence, article, wrongPairs) {
+function highlightSentenceDifferences(original, userInput, wrongPairs) {
+  const targetWords = tokenizeWords(original);
+  const answerWords = tokenizeWords(userInput);
+  
+  const wrongMap = new Map();
+  wrongPairs.forEach(pair => {
+    wrongMap.set(pair.expected.toLowerCase(), pair.actual);
+  });
+  
+  const highlightedOriginal = targetWords.map(word => {
+    if (wrongMap.has(word.toLowerCase())) {
+      return `<span class="highlight-error">${escapeHtml(word)}</span>`;
+    }
+    return escapeHtml(word);
+  }).join(' ');
+  
+  const answerUsed = new Set();
+  const highlightedAnswer = answerWords.map((word, idx) => {
+    const found = wrongPairs.find(p => {
+      const match = p.actual === word && !answerUsed.has(word);
+      if (match) answerUsed.add(word);
+      return match;
+    });
+    if (found || wrongPairs.some(p => p.actual === '（缺失）' && p.expected.toLowerCase() === word.toLowerCase())) {
+      return `<span class="highlight-error">${escapeHtml(word)}</span>`;
+    }
+    return escapeHtml(word);
+  }).join(' ');
+  
+  return { highlightedOriginal, highlightedAnswer };
+}
+
+function renderSentenceMistakeSummary(sentence, article, wrongPairs, userAnswer = '') {
   if (!elements.reviewSummary) return;
+  const { highlightedOriginal, highlightedAnswer } = highlightSentenceDifferences(sentence.text, userAnswer, wrongPairs);
   const mistakesHtml = wrongPairs.length
     ? wrongPairs.map((pair, index) => `
       <div class="review-mistake-row">
@@ -1198,10 +1362,20 @@ function renderSentenceMistakeSummary(sentence, article, wrongPairs) {
 
   elements.reviewSummary.innerHTML = `
     <div class="review-summary-header">
-      <h3>本句错词</h3>
-      <div class="review-summary-score">得分：${calculateScore(normalizeText(sentence.text), normalizeText(elements.dictationInput.value.trim()))}%</div>
+      <h3>本句对比</h3>
+      <div class="review-summary-score">得分：${calculateScore(normalizeText(sentence.text), normalizeText(userAnswer))}%</div>
     </div>
     <div class="review-summary-body">
+      <div class="review-sentence-compare">
+        <div class="review-sentence-row review-sentence-original">
+          <div class="review-sentence-label">原句</div>
+          <div class="review-sentence-text">${highlightedOriginal}</div>
+        </div>
+        <div class="review-sentence-row review-sentence-user">
+          <div class="review-sentence-label">你的输入</div>
+          <div class="review-sentence-text">${highlightedAnswer}</div>
+        </div>
+      </div>
       ${mistakesHtml}
       <div class="review-summary-note">未点击“记录”的错词将不会入错题本。</div>
     </div>
