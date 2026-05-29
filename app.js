@@ -96,9 +96,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadArticles();
   loadWordBook();
   try {
-    if (typeof renderArticleList === 'function') renderArticleList();
+    if (typeof showSection === 'function') showSection('list');
   } catch (err) {
-    console.error('renderArticleList error', err);
+    console.error('showSection error', err);
   }
   try {
     bindEvents();
