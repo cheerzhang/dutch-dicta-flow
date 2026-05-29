@@ -306,6 +306,12 @@ function speakText(text) {
 
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+function updateReviewProgress(current, total) {
+  if (!elements.reviewPanel || !total) return;
+  const progress = Math.max(0, Math.min(100, (current / total) * 100));
+  elements.reviewPanel.style.setProperty('--review-progress', `${progress}%`);
+}
+
 function showSection(mode) {
   elements.articleCreator.classList.toggle('hidden', mode !== 'create');
   elements.articleDetail.classList.toggle('hidden', mode !== 'edit');
@@ -401,6 +407,38 @@ function loadWordBook() {
 
 function saveWordBook() {
   localStorage.setItem(WORD_BOOK_KEY, JSON.stringify(wordBook));
+}
+
+function handleArticleSubmit(event) {
+  event.preventDefault();
+
+  const title = elements.title.value.trim();
+  const source = elements.source.value.trim();
+  const tags = splitTags(elements.tags.value);
+
+  if (!title) {
+    elements.title.focus();
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const article = {
+    id: generateId(),
+    title,
+    source,
+    tags,
+    sentences: [],
+    reviewCount: 0,
+    reviewTimes: [],
+    masteryScore: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  articles.push(article);
+  saveArticles();
+  elements.articleForm.reset();
+  openArticleDetail(article.id);
 }
 
 function tokenizeWords(text) {
@@ -879,6 +917,7 @@ async function renderReviewItem() {
     elements.reviewSubtitle.textContent = word.source ? `来源：${word.source}` : '';
     elements.quizIndex.textContent = currentReview.index + 1;
     elements.quizTotal.textContent = currentReview.wordIds.length;
+    updateReviewProgress(currentReview.index + 1, currentReview.wordIds.length);
     elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
     elements.sentenceNumber.textContent = `词语 ${currentReview.index + 1}`;
     elements.reviewSentenceDifficultyLabel.textContent = word.difficulty ? `难度：${word.difficulty}` : '难度：未设置';
@@ -902,6 +941,7 @@ async function renderReviewItem() {
   elements.reviewSubtitle.textContent = article.source ? `来源：${article.source}` : '';
   elements.quizIndex.textContent = currentReview.index + 1;
   elements.quizTotal.textContent = currentReview.sentenceIds.length;
+  updateReviewProgress(currentReview.index + 1, currentReview.sentenceIds.length);
   elements.quizMastery.textContent = `${Math.round(article.masteryScore)}%`;
   elements.sentenceNumber.textContent = `句子 ${currentReview.index + 1}`;
   elements.reviewSentenceDifficultyLabel.textContent = sentence.difficulty ? `难度：${sentence.difficulty}` : '难度：未设置';
@@ -1264,7 +1304,7 @@ function showReport() {
       const h = Math.round((d.ms / maxMs) * (chartHeight - 20));
       const x = i * (barWidth + barGap);
       const y = chartHeight - h - 20;
-      return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" fill="#10b981" rx="2"></rect>`;
+      return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" fill="#2563eb" rx="2"></rect>`;
     }).join('');
     // show a few x labels spaced
     const labelInterval = 7;
@@ -1291,11 +1331,21 @@ function showReport() {
       .map(article => ({ title: article.title, mastery: Math.round(article.masteryScore || 0) }))
       .sort((a, b) => b.mastery - a.mastery)
       .slice(0, 6);
+    const weakestArticles = articles
+      .filter(article => (article.sentences || []).length)
+      .map(article => ({
+        title: article.title,
+        reviews: article.reviewCount || 0,
+        mastery: Math.round(article.masteryScore || 0),
+      }))
+      .sort((a, b) => a.mastery - b.mastery)
+      .slice(0, 4);
+    const weakestSentences = wrongSentences
+      .slice()
+      .sort((a, b) => a.score - b.score || b.wrongAttempts - a.wrongAttempts)
+      .slice(0, 6);
     const summaryHtml = `
-      <div class="study-chart-card">
-        <div class="study-chart-title">Study Time by Day (Last 30 Days)</div>
-        ${studyChartSvg}
-      </div>
+      <div class="report-section-title">学习时间</div>
       <div class="report-summary-grid">
         <div class="progress-card">
           <div class="progress-card-title">Today</div>
@@ -1314,7 +1364,7 @@ function showReport() {
           <div class="progress-card-value">${formatDuration(avgPerDayMs)}</div>
         </div>
       </div>
-      <div class="report-summary-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top:12px;">
+      <div class="report-summary-grid report-streak-grid">
         <div class="progress-card">
           <div class="progress-card-title">Active Days</div>
           <div class="progress-card-value">${activeDays}</div>
@@ -1326,6 +1376,42 @@ function showReport() {
         <div class="progress-card">
           <div class="progress-card-title">Longest Streak</div>
           <div class="progress-card-value">${longestStreak} days</div>
+        </div>
+      </div>
+      <div class="study-chart-card">
+        <div class="study-chart-title">Study Time by Day (Last 30 Days)</div>
+        ${studyChartSvg}
+      </div>
+      <div class="report-kpi-grid">
+        <div class="report-kpi-card">
+          <div class="report-kpi-icon">A</div>
+          <div class="report-kpi-value">${articles.length}</div>
+          <div class="report-kpi-label">Articles</div>
+        </div>
+        <div class="report-kpi-card">
+          <div class="report-kpi-icon">S</div>
+          <div class="report-kpi-value">${totalSentenceCount}</div>
+          <div class="report-kpi-label">Sentences</div>
+        </div>
+        <div class="report-kpi-card">
+          <div class="report-kpi-icon">R</div>
+          <div class="report-kpi-value">${sessionsCount}</div>
+          <div class="report-kpi-label">Sessions</div>
+        </div>
+        <div class="report-kpi-card">
+          <div class="report-kpi-icon">V</div>
+          <div class="report-kpi-value">${reviewedCount}</div>
+          <div class="report-kpi-label">Reviewed</div>
+        </div>
+        <div class="report-kpi-card">
+          <div class="report-kpi-icon">%</div>
+          <div class="report-kpi-value">${avgArticleMastery}%</div>
+          <div class="report-kpi-label">Avg Article mastery</div>
+        </div>
+        <div class="report-kpi-card">
+          <div class="report-kpi-icon">%</div>
+          <div class="report-kpi-value">${avgSentenceMastery}%</div>
+          <div class="report-kpi-label">Avg Sentence mastery</div>
         </div>
       </div>
       <div class="report-charts">
@@ -1354,31 +1440,30 @@ function showReport() {
           `).join('') : '<div class="empty-state">暂无文章数据。</div>'}
         </div>
       </div>
-      <div class="report-summary-block">
-        <h4>关键指标</h4>
-        <div class="report-row">
-          <div class="report-row-title">Articles</div>
-          <div class="report-row-value">${articles.length}</div>
+      <div class="report-weak-grid">
+        <div class="report-summary-block">
+          <h4>Weakest Articles</h4>
+          ${weakestArticles.length ? weakestArticles.map(item => `
+            <div class="report-weak-row">
+              <div>
+                <div class="report-row-title">${escapeHtml(item.title)}</div>
+                <div class="report-row-value">${item.reviews} reviews</div>
+              </div>
+              <span class="report-score-pill ${item.mastery < 70 ? 'warning' : ''}">${item.mastery}%</span>
+            </div>
+          `).join('') : '<div class="empty-state">暂无文章熟练度数据。</div>'}
         </div>
-        <div class="report-row">
-          <div class="report-row-title">Sentences</div>
-          <div class="report-row-value">${totalSentenceCount}</div>
-        </div>
-        <div class="report-row">
-          <div class="report-row-title">Sessions</div>
-          <div class="report-row-value">${sessionsCount}</div>
-        </div>
-        <div class="report-row">
-          <div class="report-row-title">Reviewed</div>
-          <div class="report-row-value">${reviewedCount}</div>
-        </div>
-        <div class="report-row">
-          <div class="report-row-title">Avg Article mastery</div>
-          <div class="report-row-value">${avgArticleMastery}%</div>
-        </div>
-        <div class="report-row">
-          <div class="report-row-title">Avg Sentence mastery</div>
-          <div class="report-row-value">${avgSentenceMastery}%</div>
+        <div class="report-summary-block">
+          <h4>Weakest Sentences</h4>
+          ${weakestSentences.length ? weakestSentences.map(item => `
+            <div class="report-weak-row">
+              <div>
+                <div class="report-row-title">${escapeHtml(item.text)}</div>
+                <div class="report-row-value">${escapeHtml(item.articleTitle)}</div>
+              </div>
+              <span class="report-score-pill ${item.score < 70 ? 'warning' : ''}">${Math.round(item.score)}%</span>
+            </div>
+          `).join('') : '<div class="empty-state">暂无薄弱句子。</div>'}
         </div>
       </div>
     `;
