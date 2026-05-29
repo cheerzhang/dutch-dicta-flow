@@ -26,6 +26,7 @@ const elements = {
   detailMastery: document.getElementById('detail-mastery'),
   detailReviewCount: document.getElementById('detail-review-count'),
   backToList: document.getElementById('back-to-list'),
+  articlePlayAll: document.getElementById('article-play-all'),
   sentenceForm: document.getElementById('sentence-form'),
   sentenceText: document.getElementById('sentence-text'),
   sentenceTranslation: document.getElementById('sentence-translation'),
@@ -112,6 +113,9 @@ function bindEvents() {
   if (elements.backToList) {
     elements.backToList.addEventListener('click', () => showSection('list'));
   }
+  if (elements.articlePlayAll) {
+    elements.articlePlayAll.addEventListener('click', () => togglePlayAll(selectedArticleId));
+  }
   if (elements.sentenceForm && typeof handleSentenceSubmit === 'function') {
     elements.sentenceForm.addEventListener('submit', handleSentenceSubmit);
   }
@@ -162,6 +166,141 @@ function bindEvents() {
     navButtons.forEach(btn => btn.addEventListener('click', handlePageNav));
   }
 }
+
+let playAllState = {
+  playing: false,
+  stopRequested: false,
+  currentAudio: null,
+};
+
+// loop control
+playAllState.loop = false;
+playAllState.loopArticleId = null;
+
+function togglePlayAll(articleId) {
+  if (!articleId) {
+    alert('请先在文章列表选择一篇文章以使用连读功能。');
+    return;
+  }
+  if (playAllState.playing) {
+    playAllState.stopRequested = true;
+    stopPlayAll();
+  } else {
+    playAllSentences(articleId);
+  }
+}
+
+async function playAllSentences(articleId) {
+  const article = findArticle(articleId);
+  if (!article) {
+    alert('找不到文章，无法连读。');
+    return;
+  }
+  playAllState.playing = true;
+  playAllState.stopRequested = false;
+  updateArticlePlayButton(true);
+
+  for (const sentence of (article.sentences || [])) {
+    if (playAllState.stopRequested) break;
+    try {
+      if (sentence.audioId) {
+        const url = await getAudioUrl(sentence.audioId);
+        await playUrlSequentially(url);
+      } else if ('speechSynthesis' in window) {
+        await speakText(sentence.text);
+      } else {
+        // no audio and no TTS available: small pause
+        await delay(500);
+      }
+      // small gap between sentences
+      await delay(250);
+    } catch (err) {
+      console.warn('播放句子出错，跳过：', err && err.message);
+      if (playAllState.stopRequested) break;
+    }
+  }
+
+  playAllState.playing = false;
+  playAllState.stopRequested = false;
+  updateArticlePlayButton(false);
+}
+
+function stopPlayAll() {
+  if (playAllState.currentAudio) {
+    try { playAllState.currentAudio.pause(); } catch (e) {}
+    playAllState.currentAudio = null;
+  }
+  playAllState.playing = false;
+  playAllState.stopRequested = false;
+  updateArticlePlayButton(false);
+}
+
+function updateArticlePlayButton(isPlaying) {
+  if (!elements.articlePlayAll) return;
+  elements.articlePlayAll.textContent = isPlaying ? '停止连读' : '连读';
+  elements.articlePlayAll.classList.toggle('playing', isPlaying);
+}
+
+function updateArticleListButtons(articleId, isPlaying, isLooping) {
+  // toggle play button for article list entries
+  const playBtn = document.querySelector(`button.article-play-button[data-article-id="${articleId}"]`);
+  const loopBtn = document.querySelector(`button.article-loop-button[data-article-id="${articleId}"]`);
+  if (playBtn) playBtn.classList.toggle('playing', !!isPlaying);
+  if (loopBtn) loopBtn.classList.toggle('looping', !!isLooping);
+}
+
+async function startLoopPlay(articleId) {
+  if (!articleId) return;
+  playAllState.loop = true;
+  playAllState.loopArticleId = articleId;
+  updateArticleListButtons(articleId, true, true);
+  while (playAllState.loop && !playAllState.stopRequested) {
+    await playAllSentences(articleId);
+    if (playAllState.stopRequested) break;
+    // small gap between loops
+    await delay(500);
+  }
+  playAllState.loop = false;
+  playAllState.loopArticleId = null;
+  playAllState.playing = false;
+  updateArticleListButtons(articleId, false, false);
+}
+
+function stopLoopPlay(articleId) {
+  playAllState.loop = false;
+  playAllState.stopRequested = true;
+  if (playAllState.currentAudio) {
+    try { playAllState.currentAudio.pause(); } catch (e) {}
+    playAllState.currentAudio = null;
+  }
+  updateArticleListButtons(articleId, false, false);
+}
+
+function playUrlSequentially(url) {
+  return new Promise((resolve, reject) => {
+    try {
+      const audio = new Audio(url);
+      playAllState.currentAudio = audio;
+      audio.onended = () => { playAllState.currentAudio = null; resolve(); };
+      audio.onerror = (e) => { playAllState.currentAudio = null; resolve(); };
+      audio.play().catch(err => { playAllState.currentAudio = null; resolve(); });
+    } catch (err) { resolve(); }
+  });
+}
+
+function speakText(text) {
+  return new Promise((resolve) => {
+    try {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'nl-NL';
+      utter.onend = () => resolve();
+      utter.onerror = () => resolve();
+      speechSynthesis.speak(utter);
+    } catch (e) { resolve(); }
+  });
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function showSection(mode) {
   elements.articleCreator.classList.toggle('hidden', mode !== 'create');
@@ -691,12 +830,14 @@ function startReview(articleId, focusSentenceId = null) {
   }
 
   selectedArticleId = articleId;
+  const now = Date.now();
   currentReview = {
     articleId,
     sentenceIds: article.sentences.map(s => s.id),
     index: 0,
     doneIds: new Set(),
     sessionScores: [],
+    startTime: now,
   };
 
   if (focusSentenceId) {
@@ -1028,22 +1169,81 @@ function showReport() {
     const sentenceAccuracy = totalSentenceCount ? Math.round((totalSentenceCorrect / totalSentenceCount) * 100) : 0;
     const summaryHtml = `
       <div class="report-summary-grid">
-        <div>错词数：<strong>${wordBook.length}</strong></div>
-        <div>错句数：<strong>${wrongSentences.length}</strong></div>
-        <div>单词复习次数：<strong>${totalWordReviews}</strong></div>
-        <div>句子复习次数：<strong>${totalArticleReviews}</strong></div>
-        <div>单词正确率：<strong>${wordAccuracy}%</strong></div>
-        <div>句子正确率：<strong>${sentenceAccuracy}%</strong></div>
-        <div>总体熟练度：<strong>${overall}%</strong></div>
-        <div>建议优先复习：<strong>${topWords.length ? escapeHtml(topWords[0].word) : '暂无'}</strong></div>
+        <div class="progress-card">
+          <div class="progress-card-title">整体熟练度</div>
+          <div class="progress-card-value">${overall}%</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width:${overall}%"></div>
+          </div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">单词正确率</div>
+          <div class="progress-card-value">${wordAccuracy}%</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width:${wordAccuracy}%"></div>
+          </div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">句子正确率</div>
+          <div class="progress-card-value">${sentenceAccuracy}%</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width:${sentenceAccuracy}%"></div>
+          </div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">错词数</div>
+          <div class="progress-card-value">${wordBook.length}</div>
+          <div class="progress-note">${totalWordReviews} 次复习 / ${wrongSentences.length} 条错句</div>
+        </div>
       </div>
       <div class="report-summary-block">
-        <h4>重点错词</h4>
-        ${topWords.length ? topWords.map(item => `<div>${escapeHtml(item.word)} · 错题：${item.count} 次 · 复习：${item.reviewCount || 0} 次 · 熟练度：${Math.round(item.masteryScore || 0)}%</div>`).join('') : '<div class="empty-state">暂无错词。</div>'}
+        <h4>关键指标</h4>
+        <div class="report-row">
+          <div class="report-row-title">错词数</div>
+          <div class="report-bar">
+            <div class="report-bar-fill" style="width:${Math.min(100, wordBook.length * 4)}%"></div>
+          </div>
+          <div class="report-row-value">${wordBook.length}</div>
+        </div>
+        <div class="report-row">
+          <div class="report-row-title">单词复习次数</div>
+          <div class="report-bar">
+            <div class="report-bar-fill" style="width:${Math.min(100, totalWordReviews ? Math.min(100, Math.round(totalWordReviews / 10 * 100)) : 0)}%"></div>
+          </div>
+          <div class="report-row-value">${totalWordReviews}</div>
+        </div>
+        <div class="report-row">
+          <div class="report-row-title">句子复习次数</div>
+          <div class="report-bar">
+            <div class="report-bar-fill" style="width:${Math.min(100, totalArticleReviews ? Math.min(100, Math.round(totalArticleReviews / 10 * 100)) : 0)}%"></div>
+          </div>
+          <div class="report-row-value">${totalArticleReviews}</div>
+        </div>
+      </div>
+      <div class="report-summary-block">
+        <h4>重点复习建议</h4>
+        ${topWords.length ? topWords.map(item => `
+          <div class="report-item-bar">
+            <div class="report-item-label">${escapeHtml(item.word)}</div>
+            <div class="report-bar report-bar-small">
+              <div class="report-bar-fill" style="width:${Math.round(item.masteryScore || 0)}%"></div>
+            </div>
+            <div class="report-item-value">熟练度 ${Math.round(item.masteryScore || 0)}%</div>
+          </div>
+        `).join('') : '<div class="empty-state">暂无错词。</div>'}
       </div>
       <div class="report-summary-block">
         <h4>重点错句</h4>
-        ${topSentences.length ? topSentences.map(item => `<div>${escapeHtml(item.articleTitle)}：${escapeHtml(item.text)} · 熟练度：${Math.round(item.score)}%</div>`).join('') : '<div class="empty-state">暂无错句。</div>'}
+        ${topSentences.length ? topSentences.map(item => `
+          <div class="report-item-bar">
+            <div class="report-item-label">${escapeHtml(item.articleTitle)}</div>
+            <div class="report-bar report-bar-small">
+              <div class="report-bar-fill" style="width:${Math.round(item.score)}%"></div>
+            </div>
+            <div class="report-item-value">${Math.round(item.score)}%</div>
+          </div>
+          <div class="report-item-text">${escapeHtml(item.text)}</div>
+        `).join('') : '<div class="empty-state">暂无错句。</div>'}
       </div>
     `;
     elements.reportSummary.innerHTML = summaryHtml;
@@ -1179,11 +1379,14 @@ function renderWordBookPage() {
     <div class="wordbook-card" data-word-id="${item.id}">
       <div class="wordbook-card-header">
         <div class="wordbook-word">${escapeHtml(item.word)}</div>
-        <div class="wordbook-mastery">熟练度：${Math.round(item.masteryScore || 0)}%</div>
+        <div class="wordbook-mastery">${Math.round(item.masteryScore || 0)}%</div>
+      </div>
+      <div class="wordbook-progress">
+        <div class="wordbook-progress-fill" style="width:${Math.round(item.masteryScore || 0)}%"></div>
       </div>
       <div class="wordbook-meta">难度：${escapeHtml(item.difficulty || '未设置')} · 错题次数：${item.count} · 来源：${escapeHtml(item.source || '未知')}</div>
       ${item.tags && item.tags.length ? `<div class="wordbook-tags">标签：${escapeHtml(item.tags.join(', '))}</div>` : ''}
-      <div class="wordbook-translation">中文：${escapeHtml(item.translation || '暂无说明')}</div>
+      <div class="wordbook-translation">${escapeHtml(item.translation || '暂无说明')}</div>
       <div class="wordbook-actions">
         ${item.audioId ? '<button type="button" class="btn btn-small btn-secondary play-word-audio-btn">播放</button>' : ''}
         <button type="button" class="btn btn-small btn-primary wordbook-review-btn">复习</button>
@@ -1272,6 +1475,21 @@ function completeReview() {
       : 0,
     wrongWords: wordBook.slice(0, 10),
   };
+
+  // Record review time (sentence review only, not word review)
+  if (!currentReview.type && currentReview.startTime) {
+    const article = findArticle(currentReview.articleId);
+    if (article) {
+      const duration = Date.now() - currentReview.startTime;
+      article.reviewTimes = article.reviewTimes || [];
+      article.reviewTimes.push(duration);
+      // keep last 20 reviews for average calculation
+      if (article.reviewTimes.length > 20) {
+        article.reviewTimes.shift();
+      }
+      saveArticles();
+    }
+  }
 
   elements.submitAnswer.disabled = true;
   elements.nextSentence.disabled = true;
@@ -1465,7 +1683,10 @@ function renderArticleList() {
     title.textContent = article.title;
     const meta = document.createElement('div');
     meta.className = 'help-text';
-    meta.textContent = `${article.source || '来源：未知'} · ${article.tags ? article.tags.join('，') : ''}`;
+    const sentenceCount = (article.sentences || []).length;
+    const reviewTimes = article.reviewTimes || [];
+    const avgTime = reviewTimes.length ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length / 1000) : 0;
+    meta.textContent = `${article.source || '来源：未知'} · ${article.tags ? article.tags.join('，') : ''} · 句子数：${sentenceCount} · 平均用时：${avgTime}s`;
 
     const actions = document.createElement('div');
     actions.style.marginTop = '12px';
@@ -1482,6 +1703,39 @@ function renderArticleList() {
     reviewBtn.textContent = '复习';
     reviewBtn.addEventListener('click', () => startReview(article.id));
 
+    const playBtn = document.createElement('button');
+    playBtn.className = 'btn btn-primary article-play-button';
+    playBtn.textContent = '连读';
+    playBtn.dataset.articleId = article.id;
+    playBtn.addEventListener('click', () => {
+      // toggle play for this article
+      if (playAllState.playing && !playAllState.loop) {
+        // currently playing a single run -> stop
+        playAllState.stopRequested = true;
+        stopPlayAll();
+        updateArticleListButtons(article.id, false, false);
+      } else if (playAllState.loop && playAllState.loopArticleId === article.id) {
+        // currently looping this article -> stop loop
+        stopLoopPlay(article.id);
+      } else {
+        // start single play
+        playAllSentences(article.id);
+        updateArticleListButtons(article.id, true, false);
+      }
+    });
+
+    const loopBtn = document.createElement('button');
+    loopBtn.className = 'btn btn-secondary article-loop-button';
+    loopBtn.textContent = '循环播放';
+    loopBtn.dataset.articleId = article.id;
+    loopBtn.addEventListener('click', () => {
+      if (playAllState.loop && playAllState.loopArticleId === article.id) {
+        stopLoopPlay(article.id);
+      } else {
+        startLoopPlay(article.id);
+      }
+    });
+
     const delBtn = document.createElement('button');
     delBtn.className = 'btn btn-secondary';
     delBtn.textContent = '删除';
@@ -1493,6 +1747,8 @@ function renderArticleList() {
 
     actions.appendChild(editBtn);
     actions.appendChild(reviewBtn);
+    actions.appendChild(playBtn);
+    actions.appendChild(loopBtn);
     actions.appendChild(delBtn);
 
     card.appendChild(title);
@@ -1632,10 +1888,28 @@ async function handleSentenceSubmit(event) {
     try {
       const savedId = await saveAudioBlob(sentence ? sentence.audioId : null, file);
       if (!sentence) {
-        sentence = { id: generateId(), text: '', translation: '', difficulty: '', tags: [], audioId: savedId, audioName: file.name || '', reviewCount: 0, masteryScore: 0, history: [] };
+        // 新建句子：一次性设置所有字段
+        sentence = {
+          id: generateId(),
+          text,
+          translation,
+          difficulty,
+          tags,
+          audioId: savedId,
+          audioName: file.name || '',
+          reviewCount: 0,
+          masteryScore: 0,
+          history: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        article.sentences = article.sentences || [];
+        article.sentences.push(sentence);
+      } else {
+        // 编辑句子：更新音频
+        sentence.audioId = savedId;
+        sentence.audioName = file.name || sentence.audioName || '';
       }
-      sentence.audioId = savedId;
-      sentence.audioName = file.name || sentence.audioName || '';
     } catch (err) {
       showFeedback(`音频保存失败：${err.message}`, 'danger');
       return;

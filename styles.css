@@ -454,6 +454,34 @@ body {
   gap: 8px;
 }
 
+.wordbook-progress {
+  width: 100%;
+  height: 8px;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 8px 0 12px;
+}
+
+.wordbook-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.9), rgba(34,197,94,0.9));
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.article-play-button.playing,
+.btn.playing {
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.18) inset;
+  transform: translateY(-1px);
+}
+
+.article-loop-button.looping {
+  background: linear-gradient(135deg, #f97316, #fb923c);
+  color: white;
+  box-shadow: 0 12px 30px rgba(249, 115, 22, 0.12);
+}
+
 .word-example {
   padding: 10px 14px;
   border-radius: 14px;
@@ -513,12 +541,87 @@ body {
   margin-bottom: 18px;
 }
 
+.progress-card,
 .report-summary-grid div {
   background: rgba(255, 255, 255, 0.95);
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 16px;
   padding: 16px;
   box-shadow: 0 14px 28px rgba(15, 23, 42, 0.04);
+}
+
+.progress-card-title {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-bottom: 10px;
+}
+
+.progress-card-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.progress-note {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.progress-bar,
+.report-bar {
+  width: 100%;
+  height: 12px;
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.report-bar-small {
+  height: 10px;
+}
+
+.progress-fill,
+.report-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.9), rgba(59, 130, 246, 0.9));
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+.report-row {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  margin-bottom: 12px;
+}
+
+.report-row-title,
+.report-item-label {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.report-row-value,
+.report-item-value {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.report-item-bar {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.report-item-text {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  padding-left: 4px;
 }
 
 .report-summary-block {
