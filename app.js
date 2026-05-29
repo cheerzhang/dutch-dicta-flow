@@ -62,6 +62,7 @@ const elements = {
   wordbookReviewAll: document.getElementById('wordbook-review-all'),
   wordbookEditPanel: document.getElementById('wordbook-edit-panel'),
   wordbookEditForm: document.getElementById('wordbook-edit-form'),
+  startIncorrectReview: document.getElementById('start-incorrect-review'),
   wordbookEditWord: document.getElementById('wordbook-edit-word'),
   wordbookEditTranslation: document.getElementById('wordbook-edit-translation'),
   wordbookEditDifficulty: document.getElementById('wordbook-edit-difficulty'),
@@ -136,6 +137,9 @@ function bindEvents() {
   }
   if (elements.wordbookList) {
     elements.wordbookList.addEventListener('click', handleWordbookListClick);
+  }
+  if (elements.startIncorrectReview) {
+    elements.startIncorrectReview.addEventListener('click', () => startReview(selectedArticleId, null, true));
   }
   if (elements.playSentence) {
     elements.playSentence.addEventListener('click', playCurrentSentenceAudio);
@@ -313,6 +317,7 @@ function showSection(mode) {
   setActiveNav(mode);
   if (mode === 'list') {
     selectedArticleId = null;
+    renderArticleList();
   }
   if (mode === 'wordbook') {
     renderWordBookPage();
@@ -822,10 +827,24 @@ function getAudioUrl(audioId) {
     return new Blob([u8arr], { type });
   }
 
-function startReview(articleId, focusSentenceId = null) {
+function getIncorrectSentenceIds(article) {
+  return (article.sentences || []).filter(sentence => {
+    if (!sentence.history || !sentence.history.length) return true;
+    const latest = sentence.history[0];
+    return typeof latest.score !== 'number' || latest.score < 100;
+  }).map(sentence => sentence.id);
+}
+
+function startReview(articleId, focusSentenceId = null, onlyIncorrect = false) {
   const article = findArticle(articleId);
   if (!article || article.sentences.length === 0) {
     alert('请先为文章添加至少一个句子。');
+    return;
+  }
+
+  const sentenceIds = onlyIncorrect ? getIncorrectSentenceIds(article) : article.sentences.map(s => s.id);
+  if (!sentenceIds.length) {
+    alert('当前文章没有需要复习的错误句子。');
     return;
   }
 
@@ -833,11 +852,12 @@ function startReview(articleId, focusSentenceId = null) {
   const now = Date.now();
   currentReview = {
     articleId,
-    sentenceIds: article.sentences.map(s => s.id),
+    sentenceIds,
     index: 0,
     doneIds: new Set(),
     sessionScores: [],
     startTime: now,
+    onlyIncorrect,
   };
 
   if (focusSentenceId) {
@@ -877,7 +897,8 @@ async function renderReviewItem() {
   const sentence = article.sentences.find(s => s.id === currentReview.sentenceIds[currentReview.index]);
   if (!sentence) return;
 
-  elements.reviewTitle.textContent = `听写：${article.title}`;
+  const titlePrefix = currentReview.onlyIncorrect ? '错句集复习' : '听写';
+  elements.reviewTitle.textContent = `${titlePrefix}：${article.title}`;
   elements.reviewSubtitle.textContent = article.source ? `来源：${article.source}` : '';
   elements.quizIndex.textContent = currentReview.index + 1;
   elements.quizTotal.textContent = currentReview.sentenceIds.length;
@@ -1158,92 +1179,207 @@ function showReport() {
   if (elements.reportTotalWrongSentences) elements.reportTotalWrongSentences.textContent = wrongSentences.length;
 
   if (elements.reportSummary) {
-    const topWords = wordBook.slice().sort((a, b) => b.count - a.count).slice(0, 5);
-    const topSentences = wrongSentences.slice(0, 5);
     const totalWordReviews = wordBook.reduce((sum, item) => sum + (item.reviewCount || 0), 0);
-    const totalWordCorrect = wordBook.reduce((sum, item) => sum + ((item.history || []).filter(h => h.score >= 90).length), 0);
-    const wordAccuracy = totalWordReviews ? Math.round((totalWordCorrect / totalWordReviews) * 100) : 0;
     const totalArticleReviews = articles.reduce((sum, article) => sum + (article.reviewCount || 0), 0);
     const totalSentenceCount = articles.reduce((sum, article) => sum + ((article.sentences || []).length), 0);
-    const totalSentenceCorrect = articles.reduce((sum, article) => sum + ((article.sentences || []).filter(s => (s.masteryScore || 0) >= 90).length), 0);
-    const sentenceAccuracy = totalSentenceCount ? Math.round((totalSentenceCorrect / totalSentenceCount) * 100) : 0;
+    const allReviewDurations = articles.reduce((all, article) => all.concat(article.reviewTimes || []), []);
+    const totalDurationsMs = allReviewDurations.reduce((sum, d) => sum + d, 0);
+    const totalSessions = allReviewDurations.length;
+    // Gather all sentence-level history entries (with timestamps)
+    const allHistoryEntries = articles.reduce((out, article) => {
+      (article.sentences || []).forEach(s => {
+        (s.history || []).forEach(h => out.push(Object.assign({ articleId: article.id }, h)));
+      });
+      return out;
+    }, []);
+    const totalReviewEvents = allHistoryEntries.length;
+    const avgDurationPerEventMs = totalReviewEvents ? Math.round(totalDurationsMs / totalReviewEvents) : (totalSessions ? Math.round(totalDurationsMs / totalSessions) : 0);
+
+    // time window helpers
+    const now = new Date();
+    function isSameDay(d1, d2) {
+      return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+    }
+    function dateKey(d) {
+      return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+    }
+
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    const eventsToday = allHistoryEntries.filter(h => { const t = new Date(h.timestamp); return isSameDay(t, now); }).length;
+    const eventsLast7 = allHistoryEntries.filter(h => { const t = new Date(h.timestamp); return (now - t) <= 7 * oneDayMs; }).length;
+    const eventsLast30 = allHistoryEntries.filter(h => { const t = new Date(h.timestamp); return (now - t) <= 30 * oneDayMs; }).length;
+
+    const activeDaysSet = new Set(allHistoryEntries.filter(h => { const t = new Date(h.timestamp); return (now - t) <= 30 * oneDayMs; }).map(h => dateKey(new Date(h.timestamp))));
+    const activeDays = activeDaysSet.size;
+
+    // streaks calculation
+    const allDaysSet = new Set(allHistoryEntries.map(h => dateKey(new Date(h.timestamp))));
+    // current streak: count backward from today while date exists in allDaysSet
+    let currentStreak = 0;
+    for (let i = 0; ; i++) {
+      const d = new Date(now.getTime() - i * oneDayMs);
+      if (allDaysSet.has(dateKey(d))) currentStreak += 1; else break;
+    }
+    // longest streak: iterate over sorted unique days
+    const dayKeys = Array.from(allDaysSet).map(k => new Date(k)).sort((a,b) => a-b);
+    let longestStreak = 0;
+    if (dayKeys.length) {
+      let streak = 1;
+      for (let i = 1; i < dayKeys.length; i++) {
+        const prev = dayKeys[i-1];
+        const cur = dayKeys[i];
+        if ((cur - prev) === oneDayMs) {
+          streak += 1;
+        } else {
+          longestStreak = Math.max(longestStreak, streak);
+          streak = 1;
+        }
+      }
+      longestStreak = Math.max(longestStreak, streak);
+    }
+
+    // Map durations from event counts
+    const studyTodayMs = eventsToday * avgDurationPerEventMs;
+    const study7Ms = eventsLast7 * avgDurationPerEventMs;
+    const study30Ms = eventsLast30 * avgDurationPerEventMs;
+    const avgPerDayMs = Math.round((eventsLast30 * avgDurationPerEventMs) / 30);
+
+    // build last-30-days per-day durations (ms)
+    const dailyDurations = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * oneDayMs);
+      const key = dateKey(d);
+      const count = allHistoryEntries.filter(h => dateKey(new Date(h.timestamp)) === key).length;
+      dailyDurations.push({ date: key, ms: count * avgDurationPerEventMs });
+    }
+
+    // render simple SVG bar chart for study time
+    const chartHeight = 120;
+    const chartWidth = 980; // will scale responsively via viewBox
+    const barGap = 2;
+    const barCount = dailyDurations.length;
+    const barWidth = Math.max(2, Math.floor((chartWidth - (barCount - 1) * barGap) / barCount));
+    const maxMs = Math.max(...dailyDurations.map(d => d.ms), 1);
+    const barsSvg = dailyDurations.map((d, i) => {
+      const h = Math.round((d.ms / maxMs) * (chartHeight - 20));
+      const x = i * (barWidth + barGap);
+      const y = chartHeight - h - 20;
+      return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" fill="#10b981" rx="2"></rect>`;
+    }).join('');
+    // show a few x labels spaced
+    const labelInterval = 7;
+    const labels = dailyDurations.map((d, i) => (i % labelInterval === 0) ? `<text x="${i*(barWidth+barGap)+barWidth/2}" y="${chartHeight}" font-size="10" fill="#475569" text-anchor="middle">${d.date.split('-')[1]+'/'+d.date.split('-')[2]}</text>` : '').join('');
+    const studyChartSvg = `
+      <svg class="study-chart-svg" viewBox="0 0 ${chartWidth} ${chartHeight + 20}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Study time by day">
+        <g transform="translate(8,0)">
+          ${barsSvg}
+        </g>
+        <g transform="translate(8,0)">${labels}</g>
+      </svg>`;
+
+    // lower metrics
+    const sessionsCount = totalSessions;
+    const reviewedCount = totalReviewEvents;
+    const avgArticleMastery = articles.length ? Math.round(articles.reduce((s,a) => s + (a.masteryScore || 0), 0) / articles.length) : 0;
+    const allSentences = articles.reduce((s,a) => s.concat(a.sentences || []), []);
+    const avgSentenceMastery = allSentences.length ? Math.round(allSentences.reduce((s,si) => s + (si.masteryScore || 0), 0) / allSentences.length) : 0;
+    const articleReviewChart = articles
+      .map(article => ({ title: article.title, count: article.reviewCount || 0 }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+    const articleMasteryChart = articles
+      .map(article => ({ title: article.title, mastery: Math.round(article.masteryScore || 0) }))
+      .sort((a, b) => b.mastery - a.mastery)
+      .slice(0, 6);
     const summaryHtml = `
+      <div class="study-chart-card">
+        <div class="study-chart-title">Study Time by Day (Last 30 Days)</div>
+        ${studyChartSvg}
+      </div>
       <div class="report-summary-grid">
         <div class="progress-card">
-          <div class="progress-card-title">整体熟练度</div>
-          <div class="progress-card-value">${overall}%</div>
-          <div class="progress-bar">
-            <div class="progress-fill" style="width:${overall}%"></div>
-          </div>
+          <div class="progress-card-title">Today</div>
+          <div class="progress-card-value">${formatDuration(studyTodayMs)}</div>
         </div>
         <div class="progress-card">
-          <div class="progress-card-title">单词正确率</div>
-          <div class="progress-card-value">${wordAccuracy}%</div>
-          <div class="progress-bar">
-            <div class="progress-fill" style="width:${wordAccuracy}%"></div>
-          </div>
+          <div class="progress-card-title">This Week</div>
+          <div class="progress-card-value">${formatDuration(study7Ms)}</div>
         </div>
         <div class="progress-card">
-          <div class="progress-card-title">句子正确率</div>
-          <div class="progress-card-value">${sentenceAccuracy}%</div>
-          <div class="progress-bar">
-            <div class="progress-fill" style="width:${sentenceAccuracy}%"></div>
-          </div>
+          <div class="progress-card-title">This Month</div>
+          <div class="progress-card-value">${formatDuration(study30Ms)}</div>
         </div>
         <div class="progress-card">
-          <div class="progress-card-title">错词数</div>
-          <div class="progress-card-value">${wordBook.length}</div>
-          <div class="progress-note">${totalWordReviews} 次复习 / ${wrongSentences.length} 条错句</div>
+          <div class="progress-card-title">Avg / Day</div>
+          <div class="progress-card-value">${formatDuration(avgPerDayMs)}</div>
+        </div>
+      </div>
+      <div class="report-summary-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top:12px;">
+        <div class="progress-card">
+          <div class="progress-card-title">Active Days</div>
+          <div class="progress-card-value">${activeDays}</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">Current Streak</div>
+          <div class="progress-card-value">${currentStreak} days</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">Longest Streak</div>
+          <div class="progress-card-value">${longestStreak} days</div>
+        </div>
+      </div>
+      <div class="report-charts">
+        <div class="report-chart-card">
+          <div class="report-chart-title">文章复习活跃度</div>
+          ${articleReviewChart.length ? articleReviewChart.map(item => `
+            <div class="report-chart-row">
+              <div class="report-chart-label">${escapeHtml(item.title)}</div>
+              <div class="report-bar report-bar-small report-chart-bar">
+                <div class="report-bar-fill" style="width:${Math.min(100, item.count * 12)}%"></div>
+              </div>
+              <div class="report-chart-value">${item.count} 次</div>
+            </div>
+          `).join('') : '<div class="empty-state">暂无复习数据。</div>'}
+        </div>
+        <div class="report-chart-card">
+          <div class="report-chart-title">文章熟练度分布</div>
+          ${articleMasteryChart.length ? articleMasteryChart.map(item => `
+            <div class="report-chart-row">
+              <div class="report-chart-label">${escapeHtml(item.title)}</div>
+              <div class="report-bar report-bar-small report-chart-bar">
+                <div class="report-bar-fill" style="width:${item.mastery}%"></div>
+              </div>
+              <div class="report-chart-value">${item.mastery}%</div>
+            </div>
+          `).join('') : '<div class="empty-state">暂无文章数据。</div>'}
         </div>
       </div>
       <div class="report-summary-block">
         <h4>关键指标</h4>
         <div class="report-row">
-          <div class="report-row-title">错词数</div>
-          <div class="report-bar">
-            <div class="report-bar-fill" style="width:${Math.min(100, wordBook.length * 4)}%"></div>
-          </div>
-          <div class="report-row-value">${wordBook.length}</div>
+          <div class="report-row-title">Articles</div>
+          <div class="report-row-value">${articles.length}</div>
         </div>
         <div class="report-row">
-          <div class="report-row-title">单词复习次数</div>
-          <div class="report-bar">
-            <div class="report-bar-fill" style="width:${Math.min(100, totalWordReviews ? Math.min(100, Math.round(totalWordReviews / 10 * 100)) : 0)}%"></div>
-          </div>
-          <div class="report-row-value">${totalWordReviews}</div>
+          <div class="report-row-title">Sentences</div>
+          <div class="report-row-value">${totalSentenceCount}</div>
         </div>
         <div class="report-row">
-          <div class="report-row-title">句子复习次数</div>
-          <div class="report-bar">
-            <div class="report-bar-fill" style="width:${Math.min(100, totalArticleReviews ? Math.min(100, Math.round(totalArticleReviews / 10 * 100)) : 0)}%"></div>
-          </div>
-          <div class="report-row-value">${totalArticleReviews}</div>
+          <div class="report-row-title">Sessions</div>
+          <div class="report-row-value">${sessionsCount}</div>
         </div>
-      </div>
-      <div class="report-summary-block">
-        <h4>重点复习建议</h4>
-        ${topWords.length ? topWords.map(item => `
-          <div class="report-item-bar">
-            <div class="report-item-label">${escapeHtml(item.word)}</div>
-            <div class="report-bar report-bar-small">
-              <div class="report-bar-fill" style="width:${Math.round(item.masteryScore || 0)}%"></div>
-            </div>
-            <div class="report-item-value">熟练度 ${Math.round(item.masteryScore || 0)}%</div>
-          </div>
-        `).join('') : '<div class="empty-state">暂无错词。</div>'}
-      </div>
-      <div class="report-summary-block">
-        <h4>重点错句</h4>
-        ${topSentences.length ? topSentences.map(item => `
-          <div class="report-item-bar">
-            <div class="report-item-label">${escapeHtml(item.articleTitle)}</div>
-            <div class="report-bar report-bar-small">
-              <div class="report-bar-fill" style="width:${Math.round(item.score)}%"></div>
-            </div>
-            <div class="report-item-value">${Math.round(item.score)}%</div>
-          </div>
-          <div class="report-item-text">${escapeHtml(item.text)}</div>
-        `).join('') : '<div class="empty-state">暂无错句。</div>'}
+        <div class="report-row">
+          <div class="report-row-title">Reviewed</div>
+          <div class="report-row-value">${reviewedCount}</div>
+        </div>
+        <div class="report-row">
+          <div class="report-row-title">Avg Article mastery</div>
+          <div class="report-row-value">${avgArticleMastery}%</div>
+        </div>
+        <div class="report-row">
+          <div class="report-row-title">Avg Sentence mastery</div>
+          <div class="report-row-value">${avgSentenceMastery}%</div>
+        </div>
       </div>
     `;
     elements.reportSummary.innerHTML = summaryHtml;
@@ -1481,6 +1617,7 @@ function completeReview() {
     const article = findArticle(currentReview.articleId);
     if (article) {
       const duration = Date.now() - currentReview.startTime;
+      summary.duration = duration;
       article.reviewTimes = article.reviewTimes || [];
       article.reviewTimes.push(duration);
       // keep last 20 reviews for average calculation
@@ -1488,7 +1625,13 @@ function completeReview() {
         article.reviewTimes.shift();
       }
       saveArticles();
+      if (!article.reviewCount) article.reviewCount = 0;
+      if (!article.masteryScore) article.masteryScore = calculateArticleMastery(article);
     }
+  }
+
+  if (elements.reportPanel && !elements.reportPanel.classList.contains('hidden')) {
+    showReport();
   }
 
   elements.submitAnswer.disabled = true;
@@ -1517,12 +1660,14 @@ function renderReviewSummary(summary) {
     ? `<div class="review-word-book"><h4>近期错词</h4>${summary.wrongWords.slice(0, 5).map(item => `<div>${escapeHtml(item.word)} (${item.count})</div>`).join('')}</div>`
     : '<div class="empty-state">暂无错词。</div>';
 
+  const durationText = summary.duration ? `本次用时：${formatDuration(summary.duration)}` : '';
   elements.reviewSummary.innerHTML = `
     <div class="review-summary-header">
       <h3>复习完成</h3>
       <div class="review-summary-score">平均得分：${summary.average}%</div>
     </div>
     <div class="review-summary-body">
+      ${durationText ? `<div class="review-summary-duration">${durationText}</div>` : ''}
       <div class="review-summary-list">${lines.join('')}</div>
       ${wordBookHtml}
     </div>
@@ -1648,6 +1793,17 @@ function escapeHtml(unsafe) {
     .replace(/'/g, '&#039;');
 }
 
+function formatDuration(ms) {
+  if (typeof ms !== 'number' || ms < 0) return '0秒';
+  const seconds = Math.round(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes > 0) {
+    return `${minutes}分${remainder}秒`;
+  }
+  return `${remainder}秒`;
+}
+
 function levenshteinDistance(a, b) {
   const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
   matrix[0] = Array.from({ length: a.length + 1 }, (_, j) => j);
@@ -1685,8 +1841,8 @@ function renderArticleList() {
     meta.className = 'help-text';
     const sentenceCount = (article.sentences || []).length;
     const reviewTimes = article.reviewTimes || [];
-    const avgTime = reviewTimes.length ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length / 1000) : 0;
-    meta.textContent = `${article.source || '来源：未知'} · ${article.tags ? article.tags.join('，') : ''} · 句子数：${sentenceCount} · 平均用时：${avgTime}s`;
+    const avgTimeMs = reviewTimes.length ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length) : 0;
+    meta.textContent = `${article.source || '来源：未知'} · ${article.tags ? article.tags.join('，') : ''} · 句子数：${sentenceCount} · 平均用时：${formatDuration(avgTimeMs)}`;
 
     const actions = document.createElement('div');
     actions.style.marginTop = '12px';
