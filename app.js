@@ -985,8 +985,8 @@ async function renderReviewItem() {
   if (currentReview.type === 'word') {
     const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
     if (!word) return;
-    elements.reviewTitle.textContent = `错词复习：${word.word}`;
-    elements.reviewSubtitle.textContent = word.source ? `来源：${word.source}` : '';
+    elements.reviewTitle.textContent = '错词复习';
+    elements.reviewSubtitle.textContent = `第 ${currentReview.index + 1} 个 / 共 ${currentReview.wordIds.length} 个`;
     elements.quizIndex.textContent = currentReview.index + 1;
     elements.quizTotal.textContent = currentReview.wordIds.length;
     updateReviewProgress(currentReview.index + 1, currentReview.wordIds.length);
