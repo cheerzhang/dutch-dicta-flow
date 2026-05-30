@@ -125,7 +125,7 @@ button {
 }
 
 .sidebar-brand::before {
-  content: "D";
+  content: "听";
   position: absolute;
   left: 12px;
   top: 0;
@@ -721,7 +721,7 @@ button {
 }
 
 #report-panel > h2::after {
-  content: "Your Dutch dictation progress at a glance";
+  content: "查看你的荷兰语听写进度、错题单词和复习表现";
   display: block;
   margin-top: 6px;
   color: var(--muted);
@@ -800,6 +800,14 @@ button {
   font-size: 1.8rem;
   font-weight: 850;
   line-height: 1.1;
+}
+
+.success-value {
+  color: var(--success);
+}
+
+.warning-value {
+  color: var(--warning);
 }
 
 .report-section-header {
@@ -987,7 +995,8 @@ button {
   line-height: 1.25;
 }
 
-.report-weak-grid {
+.report-weak-grid,
+.mistake-report-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
@@ -1119,9 +1128,30 @@ button {
   font-size: 0.9rem;
 }
 
+.article-card-stats {
+  grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.article-card-stats span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  color: #1e40af;
+  background: #eff6ff;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
 .article-card > div:last-child {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
   align-self: center;
   justify-self: end;
   margin-top: 0 !important;
@@ -1427,7 +1457,8 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .report-weak-grid {
+  .report-weak-grid,
+  .mistake-report-grid {
     grid-template-columns: 1fr;
     gap: 16px;
   }
@@ -1451,6 +1482,7 @@ button {
   .report-kpi-grid,
   .report-charts,
   .report-weak-grid,
+  .mistake-report-grid,
   .report-word-book,
   .field-row.two-column {
     grid-template-columns: 1fr;

@@ -157,7 +157,7 @@ function bindEvents() {
     elements.nextSentence.addEventListener('click', showNextSentence);
   }
   if (elements.endReview) {
-    elements.endReview.addEventListener('click', () => showSection('edit'));
+    elements.endReview.addEventListener('click', handleEndReview);
   }
   if (elements.backupExport && typeof exportBackup === 'function') {
     elements.backupExport.addEventListener('click', exportBackup);
@@ -312,6 +312,11 @@ function updateReviewProgress(current, total) {
   elements.reviewPanel.style.setProperty('--review-progress', `${progress}%`);
 }
 
+function updateReviewNavigationLabel(current, total) {
+  if (!elements.nextSentence) return;
+  elements.nextSentence.textContent = current >= total ? '完成复习' : '下一句';
+}
+
 function showSection(mode) {
   elements.articleCreator.classList.toggle('hidden', mode !== 'create');
   elements.articleDetail.classList.toggle('hidden', mode !== 'edit');
@@ -329,6 +334,13 @@ function showSection(mode) {
     renderWordBookPage();
   }
   if (mode === 'report') showReport();
+}
+
+function handleEndReview() {
+  if (currentReview && currentReview.completed) {
+    currentReview = null;
+  }
+  showSection('list');
 }
 
 function setActiveNav(mode) {
@@ -660,6 +672,96 @@ function getAudioUrl(audioId) {
     });
   }
 
+  function safeString(value) {
+    if (value === null || value === undefined) return '';
+    return typeof value === 'string' ? value : String(value);
+  }
+
+  function toNumber(value, fallback = 0) {
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  }
+
+  function normalizeTagsValue(value) {
+    if (Array.isArray(value)) {
+      return value.map(tag => safeString(tag).trim()).filter(Boolean);
+    }
+    return value ? splitTags(safeString(value)) : [];
+  }
+
+  function normalizeSentenceForBackup(sentence) {
+    const source = typeof sentence === 'string' ? { text: sentence } : (sentence || {});
+    const now = new Date().toISOString();
+    return {
+      id: safeString(source.id) || generateId(),
+      text: safeString(source.text || source.content),
+      translation: safeString(source.translation || source.cn || source.note),
+      tags: normalizeTagsValue(source.tags || source.tag),
+      difficulty: safeString(source.difficulty || source.level),
+      audioId: safeString(source.audioId || source.audio) || null,
+      audioName: safeString(source.audioName),
+      masteryScore: toNumber(source.masteryScore, toNumber(source.score, 0)),
+      reviewCount: toNumber(source.reviewCount, toNumber(source.reviews, 0)),
+      history: Array.isArray(source.history) ? source.history : (Array.isArray(source.historyEntries) ? source.historyEntries : []),
+      lastReviewed: safeString(source.lastReviewed),
+      createdAt: safeString(source.createdAt) || now,
+      updatedAt: safeString(source.updatedAt) || now,
+    };
+  }
+
+  function normalizeArticleForBackup(article) {
+    const source = article || {};
+    const now = new Date().toISOString();
+    let rawSentences = source.sentences;
+    if (!Array.isArray(rawSentences)) {
+      const candidates = source.content || source.items;
+      if (Array.isArray(candidates)) {
+        rawSentences = candidates;
+      } else if (typeof candidates === 'string') {
+        rawSentences = candidates.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      } else {
+        rawSentences = [];
+      }
+    }
+
+    return {
+      id: safeString(source.id) || generateId(),
+      title: safeString(source.title).trim(),
+      source: safeString(source.source),
+      tags: normalizeTagsValue(source.tags || source.tag),
+      sentences: rawSentences.map(normalizeSentenceForBackup).filter(sentence => sentence.text),
+      reviewCount: toNumber(source.reviewCount, 0),
+      reviewTimes: Array.isArray(source.reviewTimes) ? source.reviewTimes.filter(time => typeof time === 'number' && Number.isFinite(time)) : [],
+      reviewSessions: Array.isArray(source.reviewSessions) ? source.reviewSessions.filter(session => session && typeof session === 'object') : [],
+      masteryScore: toNumber(source.masteryScore, 0),
+      createdAt: safeString(source.createdAt) || now,
+      updatedAt: safeString(source.updatedAt) || now,
+    };
+  }
+
+  function normalizeWordBookEntryForBackup(entry) {
+    const source = entry || {};
+    return {
+      id: safeString(source.id) || generateId(),
+      word: safeString(source.word).trim(),
+      translation: safeString(source.translation),
+      difficulty: safeString(source.difficulty),
+      source: safeString(source.source),
+      tags: normalizeTagsValue(source.tags),
+      count: toNumber(source.count, 0),
+      lastSeen: safeString(source.lastSeen) || new Date().toISOString(),
+      examples: Array.isArray(source.examples) ? source.examples.map(safeString).filter(Boolean).slice(0, 3) : [],
+      masteryScore: toNumber(source.masteryScore, toNumber(source.score, 0)),
+      reviewCount: toNumber(source.reviewCount, 0),
+      audioId: safeString(source.audioId) || null,
+      audioName: safeString(source.audioName),
+      history: Array.isArray(source.history) ? source.history : [],
+    };
+  }
+
+  function getArticleImportKey(article) {
+    return `${safeString(article.title).trim().toLowerCase()}|${safeString(article.source).trim().toLowerCase()}`;
+  }
+
   async function exportBackup() {
     try {
       const audioEntries = await getAllAudioEntries();
@@ -668,9 +770,9 @@ function getAudioUrl(audioId) {
         return { id: entry.id, type: entry.file.type, data };
       }));
       const payload = {
-        version: 1,
-        articles,
-        wordBook,
+        version: 2,
+        articles: articles.map(normalizeArticleForBackup).filter(article => article.title),
+        wordBook: wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word),
         audioFiles,
         exportedAt: new Date().toISOString(),
       };
@@ -684,16 +786,17 @@ function getAudioUrl(audioId) {
   async function handleBackupImport(event) {
     const file = event.target.files[0];
     if (!file) return;
-    const text = await file.text();
     try {
+      const text = await file.text();
       const data = JSON.parse(text);
       const result = await importBackup(data);
       elements.backupStatus.textContent = `备份已导入，新增 ${result.importedCount} 篇，覆盖 ${result.overwrittenCount} 篇。`;
-      elements.backupImport.value = '';
       renderArticleList();
       showSection('list');
     } catch (error) {
       elements.backupStatus.textContent = `导入失败：${error.message}`;
+    } finally {
+      elements.backupImport.value = '';
     }
   }
 
@@ -704,6 +807,7 @@ function getAudioUrl(audioId) {
       const audioFilesArray = Array.isArray(data.audioFiles) ? data.audioFiles : [];
       const importPromises = audioFilesArray.map(async entry => {
         try {
+          if (!entry || !entry.id || !entry.data) return;
           // entry.data may already be a data URL or base64 string
           const type = entry.type || (entry.data && entry.data.split(';')[0].split(':')[1]) || 'audio/mpeg';
           const blob = dataUrlToBlob(entry.data, type);
@@ -714,57 +818,20 @@ function getAudioUrl(audioId) {
       });
     await Promise.all(importPromises);
     const existingById = new Map(articles.map(item => [item.id, item]));
-    const existingByKey = new Map(articles.map(item => [`${item.title.trim().toLowerCase()}|${item.source.trim().toLowerCase()}`, item]));
+    const existingByKey = new Map(articles.map(item => [getArticleImportKey(item), item]));
     let importedCount = 0;
     let overwrittenCount = 0;
 
-    data.articles.forEach(article => {
-      if (!article || !article.title) return;
+    for (const rawArticle of data.articles) {
+      const article = normalizeArticleForBackup(rawArticle);
+      if (!article.title) continue;
 
-      // Normalize legacy article formats so sentences are preserved.
-      // Older backups might store sentences in `content` (string or array), `items`,
-      // or `sentences` as an array of strings. Convert them to the expected
-      // `sentences` array of objects with required fields.
-      try {
-        if (!Array.isArray(article.sentences)) {
-          const candidates = article.content || article.items || null;
-          if (Array.isArray(candidates)) {
-            article.sentences = candidates.map(s => (typeof s === 'string' ? { id: generateId(), text: s } : s));
-          } else if (typeof candidates === 'string') {
-            const lines = candidates.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-            article.sentences = lines.map(text => ({ id: generateId(), text }));
-          } else {
-            article.sentences = [];
-          }
-        } else {
-          // If sentences exist but are strings, convert to objects
-          if (article.sentences.length && typeof article.sentences[0] === 'string') {
-            article.sentences = article.sentences.map(text => ({ id: generateId(), text }));
-          }
-        }
-        // Ensure each sentence has standard fields
-        article.sentences = (article.sentences || []).map(s => ({
-          id: s.id || generateId(),
-          text: s.text || s.content || '',
-          translation: s.translation || s.cn || s.note || '',
-          tags: Array.isArray(s.tags) ? s.tags : (s.tag ? [s.tag] : []),
-          difficulty: s.difficulty || s.level || '',
-          audioId: s.audioId || s.audio || null,
-          masteryScore: typeof s.masteryScore === 'number' ? s.masteryScore : (s.score || 0),
-          reviewCount: typeof s.reviewCount === 'number' ? s.reviewCount : (s.reviews || 0),
-          history: Array.isArray(s.history) ? s.history : (s.historyEntries || []),
-        }));
-      } catch (err) {
-        console.warn('文章条目归一化失败，跳过该文章的句子转换', article && article.title, err && err.message);
-        article.sentences = Array.isArray(article.sentences) ? article.sentences : [];
-      }
-
-      const key = `${article.title.trim().toLowerCase()}|${(article.source || '').trim().toLowerCase()}`;
+      const key = getArticleImportKey(article);
       let targetArticle = existingById.get(article.id) || existingByKey.get(key);
       if (targetArticle) {
         const oldAudioIds = new Set((targetArticle.sentences || []).map(s => s.audioId).filter(Boolean));
         const newAudioIds = new Set((article.sentences || []).map(s => s.audioId).filter(Boolean));
-        oldAudioIds.forEach(id => { if (!newAudioIds.has(id)) deleteAudio(id); });
+        await Promise.all(Array.from(oldAudioIds).filter(id => !newAudioIds.has(id)).map(id => deleteAudio(id)));
         const existingId = targetArticle.id;
         Object.assign(targetArticle, article);
         targetArticle.id = existingId;
@@ -778,10 +845,10 @@ function getAudioUrl(audioId) {
         existingByKey.set(key, article);
         importedCount += 1;
       }
-    });
+    }
 
     const importedWords = Array.isArray(data.wordBook) ? data.wordBook : [];
-    importedWords.forEach(entry => {
+    importedWords.map(normalizeWordBookEntryForBackup).forEach(entry => {
       if (!entry.word) return;
       const key = entry.word.trim().toLowerCase();
       let existing = wordBook.find(item => item.word.trim().toLowerCase() === key);
@@ -855,8 +922,12 @@ function getAudioUrl(audioId) {
   }
 
   function dataUrlToBlob(dataUrl, type) {
-    const arr = dataUrl.split(',');
-    const bstr = atob(arr[1]);
+    if (!dataUrl) {
+      throw new Error('音频数据为空。');
+    }
+    const value = safeString(dataUrl);
+    const base64 = value.includes(',') ? value.split(',').pop() : value;
+    const bstr = atob(base64);
     let n = bstr.length;
     const u8arr = new Uint8Array(n);
     while (n--) {
@@ -904,6 +975,7 @@ function startReview(articleId, focusSentenceId = null, onlyIncorrect = false) {
   }
 
   clearReviewSummary();
+  if (elements.endReview) elements.endReview.textContent = '结束复习';
   renderReviewItem();
   showSection('review');
 }
@@ -918,6 +990,7 @@ async function renderReviewItem() {
     elements.quizIndex.textContent = currentReview.index + 1;
     elements.quizTotal.textContent = currentReview.wordIds.length;
     updateReviewProgress(currentReview.index + 1, currentReview.wordIds.length);
+    updateReviewNavigationLabel(currentReview.index + 1, currentReview.wordIds.length);
     elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
     elements.sentenceNumber.textContent = `词语 ${currentReview.index + 1}`;
     elements.reviewSentenceDifficultyLabel.textContent = word.difficulty ? `难度：${word.difficulty}` : '难度：未设置';
@@ -942,6 +1015,7 @@ async function renderReviewItem() {
   elements.quizIndex.textContent = currentReview.index + 1;
   elements.quizTotal.textContent = currentReview.sentenceIds.length;
   updateReviewProgress(currentReview.index + 1, currentReview.sentenceIds.length);
+  updateReviewNavigationLabel(currentReview.index + 1, currentReview.sentenceIds.length);
   elements.quizMastery.textContent = `${Math.round(article.masteryScore)}%`;
   elements.sentenceNumber.textContent = `句子 ${currentReview.index + 1}`;
   elements.reviewSentenceDifficultyLabel.textContent = sentence.difficulty ? `难度：${sentence.difficulty}` : '难度：未设置';
@@ -1037,7 +1111,7 @@ function handleSubmitAnswer() {
     elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
     renderWordReviewResult(word, score, answer);
     if (currentReview.doneIds.size >= currentReview.wordIds.length) {
-      completeReview();
+      showFeedback('本轮错词已全部提交，点击“完成复习”查看总结。', 'success');
     }
     return;
   }
@@ -1083,7 +1157,7 @@ function handleSubmitAnswer() {
   renderSentenceMistakeSummary(sentence, article, currentReview.lastWrongPairs || [], answer);
 
   if (currentReview.doneIds.size >= currentReview.sentenceIds.length) {
-    completeReview();
+    showFeedback('本篇文章已全部提交，点击“完成复习”查看总结。', 'success');
   }
 }
 
@@ -1124,12 +1198,12 @@ function showNextSentence() {
     }
 
     if (nextIndex >= total) {
-      const remaining = currentReview.wordIds.filter(id => !currentReview.doneIds.has(id));
-      if (remaining.length === 0) {
+      if (currentReview.doneIds.size >= total) {
         completeReview();
         return;
       }
-      nextIndex = currentReview.wordIds.findIndex(id => !currentReview.doneIds.has(id));
+      showFeedback('请先提交当前内容，再完成复习。', 'warning');
+      return;
     }
 
     if (nextIndex >= 0 && nextIndex < total) {
@@ -1147,12 +1221,12 @@ function showNextSentence() {
   }
 
   if (nextIndex >= total) {
-    const remaining = currentReview.sentenceIds.filter(id => !currentReview.doneIds.has(id));
-    if (remaining.length === 0) {
-      completeReview(article);
+    if (currentReview.doneIds.size >= total) {
+      completeReview();
       return;
     }
-    nextIndex = currentReview.sentenceIds.findIndex(id => !currentReview.doneIds.has(id));
+    showFeedback('请先提交当前句子的听写结果，再完成复习。', 'warning');
+    return;
   }
 
   if (nextIndex >= 0 && nextIndex < total) {
@@ -1310,7 +1384,7 @@ function showReport() {
     const labelInterval = 7;
     const labels = dailyDurations.map((d, i) => (i % labelInterval === 0) ? `<text x="${i*(barWidth+barGap)+barWidth/2}" y="${chartHeight}" font-size="10" fill="#475569" text-anchor="middle">${d.date.split('-')[1]+'/'+d.date.split('-')[2]}</text>` : '').join('');
     const studyChartSvg = `
-      <svg class="study-chart-svg" viewBox="0 0 ${chartWidth} ${chartHeight + 20}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Study time by day">
+      <svg class="study-chart-svg" viewBox="0 0 ${chartWidth} ${chartHeight + 20}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="最近 30 天学习时间">
         <g transform="translate(8,0)">
           ${barsSvg}
         </g>
@@ -1344,74 +1418,133 @@ function showReport() {
       .slice()
       .sort((a, b) => a.score - b.score || b.wrongAttempts - a.wrongAttempts)
       .slice(0, 6);
+    const totalMistakeWords = wordBook.length;
+    const masteredMistakeWords = wordBook.filter(item => (item.masteryScore || 0) >= 90).length;
+    const activeMistakeWords = wordBook.filter(item => (item.masteryScore || 0) < 90).length;
+    const avgMistakeWordMastery = totalMistakeWords
+      ? Math.round(wordBook.reduce((sum, item) => sum + (item.masteryScore || 0), 0) / totalMistakeWords)
+      : 0;
+    const mostImprovedWords = wordBook
+      .slice()
+      .sort((a, b) => (b.masteryScore || 0) - (a.masteryScore || 0) || (b.reviewCount || 0) - (a.reviewCount || 0))
+      .slice(0, 6);
+    const stillWeakWords = wordBook
+      .slice()
+      .sort((a, b) => (a.masteryScore || 0) - (b.masteryScore || 0) || (b.count || 0) - (a.count || 0))
+      .slice(0, 6);
     const summaryHtml = `
       <div class="report-section-title">学习时间</div>
       <div class="report-summary-grid">
         <div class="progress-card">
-          <div class="progress-card-title">Today</div>
+          <div class="progress-card-title">今天</div>
           <div class="progress-card-value">${formatDuration(studyTodayMs)}</div>
         </div>
         <div class="progress-card">
-          <div class="progress-card-title">This Week</div>
+          <div class="progress-card-title">本周</div>
           <div class="progress-card-value">${formatDuration(study7Ms)}</div>
         </div>
         <div class="progress-card">
-          <div class="progress-card-title">This Month</div>
+          <div class="progress-card-title">本月</div>
           <div class="progress-card-value">${formatDuration(study30Ms)}</div>
         </div>
         <div class="progress-card">
-          <div class="progress-card-title">Avg / Day</div>
+          <div class="progress-card-title">日均</div>
           <div class="progress-card-value">${formatDuration(avgPerDayMs)}</div>
         </div>
       </div>
       <div class="report-summary-grid report-streak-grid">
         <div class="progress-card">
-          <div class="progress-card-title">Active Days</div>
+          <div class="progress-card-title">活跃天数</div>
           <div class="progress-card-value">${activeDays}</div>
         </div>
         <div class="progress-card">
-          <div class="progress-card-title">Current Streak</div>
-          <div class="progress-card-value">${currentStreak} days</div>
+          <div class="progress-card-title">当前连续</div>
+          <div class="progress-card-value">${currentStreak}天</div>
         </div>
         <div class="progress-card">
-          <div class="progress-card-title">Longest Streak</div>
-          <div class="progress-card-value">${longestStreak} days</div>
+          <div class="progress-card-title">最长连续</div>
+          <div class="progress-card-value">${longestStreak}天</div>
         </div>
       </div>
       <div class="study-chart-card">
-        <div class="study-chart-title">Study Time by Day (Last 30 Days)</div>
+        <div class="study-chart-title">最近 30 天学习时间</div>
         ${studyChartSvg}
       </div>
       <div class="report-kpi-grid">
         <div class="report-kpi-card">
-          <div class="report-kpi-icon">A</div>
+          <div class="report-kpi-icon">文</div>
           <div class="report-kpi-value">${articles.length}</div>
-          <div class="report-kpi-label">Articles</div>
+          <div class="report-kpi-label">文章</div>
         </div>
         <div class="report-kpi-card">
-          <div class="report-kpi-icon">S</div>
+          <div class="report-kpi-icon">句</div>
           <div class="report-kpi-value">${totalSentenceCount}</div>
-          <div class="report-kpi-label">Sentences</div>
+          <div class="report-kpi-label">句子</div>
         </div>
         <div class="report-kpi-card">
-          <div class="report-kpi-icon">R</div>
+          <div class="report-kpi-icon">次</div>
           <div class="report-kpi-value">${sessionsCount}</div>
-          <div class="report-kpi-label">Sessions</div>
+          <div class="report-kpi-label">复习轮次</div>
         </div>
         <div class="report-kpi-card">
-          <div class="report-kpi-icon">V</div>
+          <div class="report-kpi-icon">练</div>
           <div class="report-kpi-value">${reviewedCount}</div>
-          <div class="report-kpi-label">Reviewed</div>
+          <div class="report-kpi-label">已复习记录</div>
         </div>
         <div class="report-kpi-card">
           <div class="report-kpi-icon">%</div>
           <div class="report-kpi-value">${avgArticleMastery}%</div>
-          <div class="report-kpi-label">Avg Article mastery</div>
+          <div class="report-kpi-label">平均文章熟练度</div>
         </div>
         <div class="report-kpi-card">
           <div class="report-kpi-icon">%</div>
           <div class="report-kpi-value">${avgSentenceMastery}%</div>
-          <div class="report-kpi-label">Avg Sentence mastery</div>
+          <div class="report-kpi-label">平均句子熟练度</div>
+        </div>
+      </div>
+      <div class="report-section-title">错题单词报告</div>
+      <div class="report-summary-grid">
+        <div class="progress-card">
+          <div class="progress-card-title">错词总数</div>
+          <div class="progress-card-value">${totalMistakeWords}</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">已掌握</div>
+          <div class="progress-card-value success-value">${masteredMistakeWords}</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">仍需复习</div>
+          <div class="progress-card-value warning-value">${activeMistakeWords}</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">平均熟练度</div>
+          <div class="progress-card-value">${avgMistakeWordMastery}%</div>
+        </div>
+      </div>
+      <div class="mistake-report-grid">
+        <div class="report-summary-block">
+          <h4>进步最好的单词</h4>
+          ${mostImprovedWords.length ? mostImprovedWords.map(item => `
+            <div class="report-weak-row">
+              <div>
+                <div class="report-row-title">${escapeHtml(item.word)}</div>
+                <div class="report-row-value">错题 ${item.count || 0} 次 · 复习 ${item.reviewCount || 0} 次</div>
+              </div>
+              <span class="report-score-pill">${Math.round(item.masteryScore || 0)}%</span>
+            </div>
+          `).join('') : '<div class="empty-state">暂无错词数据。</div>'}
+        </div>
+        <div class="report-summary-block">
+          <h4>仍然薄弱的单词</h4>
+          ${stillWeakWords.length ? stillWeakWords.map(item => `
+            <div class="report-weak-row">
+              <div>
+                <div class="report-row-title">${escapeHtml(item.word)}</div>
+                <div class="report-row-value">错题 ${item.count || 0} 次 · 复习 ${item.reviewCount || 0} 次</div>
+              </div>
+              <span class="report-score-pill ${(item.masteryScore || 0) < 70 ? 'warning' : ''}">${Math.round(item.masteryScore || 0)}%</span>
+            </div>
+          `).join('') : '<div class="empty-state">暂无薄弱错词。</div>'}
         </div>
       </div>
       <div class="report-charts">
@@ -1442,19 +1575,19 @@ function showReport() {
       </div>
       <div class="report-weak-grid">
         <div class="report-summary-block">
-          <h4>Weakest Articles</h4>
+          <h4>薄弱文章</h4>
           ${weakestArticles.length ? weakestArticles.map(item => `
             <div class="report-weak-row">
               <div>
                 <div class="report-row-title">${escapeHtml(item.title)}</div>
-                <div class="report-row-value">${item.reviews} reviews</div>
+                <div class="report-row-value">复习 ${item.reviews} 次</div>
               </div>
               <span class="report-score-pill ${item.mastery < 70 ? 'warning' : ''}">${item.mastery}%</span>
             </div>
           `).join('') : '<div class="empty-state">暂无文章熟练度数据。</div>'}
         </div>
         <div class="report-summary-block">
-          <h4>Weakest Sentences</h4>
+          <h4>薄弱句子</h4>
           ${weakestSentences.length ? weakestSentences.map(item => `
             <div class="report-weak-row">
               <div>
@@ -1666,6 +1799,7 @@ function startWordReview(wordId = null) {
     doneIds: new Set(),
     sessionScores: [],
   };
+  if (elements.endReview) elements.endReview.textContent = '结束复习';
   showSection('review');
   renderReviewItem();
 }
@@ -1687,7 +1821,8 @@ function showFeedback(message, type = 'info') {
 }
 
 function completeReview() {
-  if (!currentReview) return;
+  if (!currentReview || currentReview.completed) return;
+  currentReview.completed = true;
   const summary = {
     total: currentReview.type === 'word' ? currentReview.wordIds.length : currentReview.sentenceIds.length,
     scores: currentReview.sessionScores.map(item => ({ sentence: item.sentence, score: item.score })),
@@ -1704,10 +1839,20 @@ function completeReview() {
       const duration = Date.now() - currentReview.startTime;
       summary.duration = duration;
       article.reviewTimes = article.reviewTimes || [];
+      article.reviewSessions = article.reviewSessions || [];
       article.reviewTimes.push(duration);
+      article.reviewSessions.push({
+        timestamp: new Date().toISOString(),
+        duration,
+        averageScore: summary.average,
+        reviewedCount: currentReview.doneIds.size,
+      });
       // keep last 20 reviews for average calculation
       if (article.reviewTimes.length > 20) {
         article.reviewTimes.shift();
+      }
+      if (article.reviewSessions.length > 60) {
+        article.reviewSessions = article.reviewSessions.slice(-60);
       }
       saveArticles();
       if (!article.reviewCount) article.reviewCount = 0;
@@ -1725,7 +1870,8 @@ function completeReview() {
   elements.showAnswer.disabled = true;
 
   renderReviewSummary(summary);
-  showFeedback('本次复习已完成，查看下方总结或点击“结束复习”。', 'success');
+  if (elements.endReview) elements.endReview.textContent = '关闭';
+  showFeedback('本次复习已完成，查看下方总结或点击“关闭”回到首页。', 'success');
 }
 
 function clearReviewSummary() {
@@ -1736,6 +1882,8 @@ function clearReviewSummary() {
   elements.nextSentence.disabled = false;
   elements.playSentence.disabled = false;
   elements.showAnswer.disabled = false;
+  elements.nextSentence.textContent = '下一句';
+  if (elements.endReview) elements.endReview.textContent = '结束复习';
 }
 
 function renderReviewSummary(summary) {
@@ -1908,6 +2056,39 @@ function findArticle(id) {
   return articles.find(a => a.id === id);
 }
 
+function getArticleListStats(article) {
+  const sentences = article.sentences || [];
+  const reviewTimes = (article.reviewTimes || []).filter(time => typeof time === 'number' && Number.isFinite(time));
+  const reviewSessions = Array.isArray(article.reviewSessions) ? article.reviewSessions : [];
+  const todayKey = getLocalDateKey(new Date());
+  const todayMs = reviewSessions
+    .filter(session => getLocalDateKey(new Date(session.timestamp)) === todayKey)
+    .reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+  const attempts = sentences.reduce((sum, sentence) => sum + ((sentence.history || []).length), 0);
+  const correctAttempts = sentences.reduce((sum, sentence) => {
+    return sum + (sentence.history || []).filter(item => toNumber(item.score, 0) >= 90).length;
+  }, 0);
+  const accuracy = attempts ? Math.round((correctAttempts / attempts) * 100) : 0;
+  const avgTimeMs = reviewTimes.length ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length) : 0;
+
+  return {
+    sentenceCount: sentences.length,
+    sessionCount: reviewTimes.length,
+    todayMs,
+    avgTimeMs,
+    accuracy,
+    mastery: Math.round(article.masteryScore || 0),
+  };
+}
+
+function getLocalDateKey(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function renderArticleList() {
   if (!elements.articles) return;
   elements.articles.innerHTML = '';
@@ -1924,10 +2105,20 @@ function renderArticleList() {
     title.textContent = article.title;
     const meta = document.createElement('div');
     meta.className = 'help-text';
-    const sentenceCount = (article.sentences || []).length;
-    const reviewTimes = article.reviewTimes || [];
-    const avgTimeMs = reviewTimes.length ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length) : 0;
-    meta.textContent = `${article.source || '来源：未知'} · ${article.tags ? article.tags.join('，') : ''} · 句子数：${sentenceCount} · 平均用时：${formatDuration(avgTimeMs)}`;
+    const stats = getArticleListStats(article);
+    const tagsText = article.tags && article.tags.length ? ` · 标签：${article.tags.join('，')}` : '';
+    meta.textContent = `${article.source || '来源：未知'}${tagsText}`;
+
+    const statLine = document.createElement('div');
+    statLine.className = 'article-card-stats';
+    statLine.innerHTML = `
+      <span>句子 ${stats.sentenceCount}</span>
+      <span>完整复习 ${stats.sessionCount} 次</span>
+      <span>今天用时 ${formatDuration(stats.todayMs)}</span>
+      <span>平均用时 ${formatDuration(stats.avgTimeMs)}</span>
+      <span>正确率 ${stats.accuracy}%</span>
+      <span>熟练度 ${stats.mastery}%</span>
+    `;
 
     const actions = document.createElement('div');
     actions.style.marginTop = '12px';
@@ -1994,6 +2185,7 @@ function renderArticleList() {
 
     card.appendChild(title);
     card.appendChild(meta);
+    card.appendChild(statLine);
     card.appendChild(actions);
     elements.articles.appendChild(card);
   });
