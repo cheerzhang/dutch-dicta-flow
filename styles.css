@@ -125,7 +125,7 @@ button {
 }
 
 .sidebar-brand::before {
-  content: "听";
+  content: "";
   position: absolute;
   left: 12px;
   top: 0;
@@ -134,10 +134,7 @@ button {
   width: 42px;
   height: 42px;
   border-radius: 12px;
-  color: #ffffff;
-  background: var(--accent);
-  font-size: 1.2rem;
-  font-weight: 900;
+  background: var(--accent) url("dutch-listen-icon.svg") center / 34px 34px no-repeat;
 }
 
 .sidebar-brand h2 {
@@ -170,6 +167,50 @@ button {
   border-color: transparent;
   border-radius: 10px;
   box-shadow: none;
+  gap: 12px;
+}
+
+.page-nav .nav-btn::before {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  color: #93c5fd;
+  background: rgba(37, 99, 235, 0.12);
+  font-size: 0.82rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.page-nav .nav-btn[data-page="list"]::before {
+  content: "文";
+}
+
+.page-nav .nav-btn[data-page="create"]::before {
+  content: "+";
+  font-size: 1rem;
+}
+
+.page-nav .nav-btn[data-page="edit"]::before {
+  content: "编";
+}
+
+.page-nav .nav-btn[data-page="review"]::before {
+  content: "练";
+}
+
+.page-nav .nav-btn[data-page="wordbook"]::before {
+  content: "错";
+}
+
+.page-nav .nav-btn[data-page="report"]::before {
+  content: "报";
+}
+
+.page-nav .nav-btn[data-page="backup"]::before {
+  content: "备";
 }
 
 .page-nav .nav-btn:hover {
@@ -178,11 +219,21 @@ button {
   transform: none;
 }
 
+.page-nav .nav-btn:hover::before {
+  color: #ffffff;
+  background: rgba(37, 99, 235, 0.28);
+}
+
 .page-nav .nav-btn.active {
   color: var(--accent);
   background: #1b2a4d;
   border-color: rgba(255, 255, 255, 0.16);
   box-shadow: none;
+}
+
+.page-nav .nav-btn.active::before {
+  color: #ffffff;
+  background: var(--accent);
 }
 
 .app-content {
@@ -477,7 +528,7 @@ button {
 
 #review-panel .review-status {
   display: grid;
-  grid-template-columns: minmax(150px, max-content) minmax(150px, max-content);
+  grid-template-columns: repeat(3, minmax(150px, max-content));
   justify-content: space-between;
   margin-top: 18px;
   gap: 14px;

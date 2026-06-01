@@ -77,6 +77,7 @@ const elements = {
   quizIndex: document.getElementById('quiz-index'),
   quizTotal: document.getElementById('quiz-total'),
   quizMastery: document.getElementById('quiz-mastery'),
+  reviewElapsed: document.getElementById('review-elapsed'),
   sentenceNumber: document.getElementById('sentence-number'),
   playSentence: document.getElementById('play-sentence'),
   showAnswer: document.getElementById('show-answer'),
@@ -317,6 +318,24 @@ function updateReviewNavigationLabel(current, total) {
   elements.nextSentence.textContent = current >= total ? '完成复习' : '下一句';
 }
 
+function startReviewTimer() {
+  stopReviewTimer();
+  updateReviewTimerDisplay();
+  reviewTimer = setInterval(updateReviewTimerDisplay, 1000);
+}
+
+function stopReviewTimer() {
+  if (reviewTimer) {
+    clearInterval(reviewTimer);
+    reviewTimer = null;
+  }
+}
+
+function updateReviewTimerDisplay() {
+  if (!elements.reviewElapsed || !currentReview || !currentReview.startTime) return;
+  elements.reviewElapsed.textContent = formatDuration(Date.now() - currentReview.startTime);
+}
+
 function showSection(mode) {
   elements.articleCreator.classList.toggle('hidden', mode !== 'create');
   elements.articleDetail.classList.toggle('hidden', mode !== 'edit');
@@ -338,6 +357,20 @@ function showSection(mode) {
 
 function handleEndReview() {
   if (currentReview && currentReview.completed) {
+    stopReviewTimer();
+    currentReview = null;
+    showSection('list');
+    return;
+  }
+  if (currentReview) {
+    if (currentReview.doneIds && currentReview.doneIds.size > 0) {
+      completeReview();
+      return;
+    }
+    if (!confirm('当前复习还没有提交任何内容，确定要结束并回到首页吗？')) {
+      return;
+    }
+    stopReviewTimer();
     currentReview = null;
   }
   showSection('list');
@@ -762,6 +795,53 @@ function getAudioUrl(audioId) {
     return `${safeString(article.title).trim().toLowerCase()}|${safeString(article.source).trim().toLowerCase()}`;
   }
 
+  function getWordImportKey(entry) {
+    return safeString(entry && entry.word).trim().toLowerCase();
+  }
+
+  function mergeUniqueStrings(a = [], b = [], limit = Infinity) {
+    const merged = [];
+    [...a, ...b].forEach(item => {
+      const value = safeString(item).trim();
+      if (value && !merged.includes(value)) merged.push(value);
+    });
+    return merged.slice(0, limit);
+  }
+
+  function mergeWordBookEntries(primary, duplicate) {
+    primary.count = Math.max(toNumber(primary.count, 0), toNumber(duplicate.count, 0));
+    primary.reviewCount = Math.max(toNumber(primary.reviewCount, 0), toNumber(duplicate.reviewCount, 0));
+    primary.masteryScore = Math.max(toNumber(primary.masteryScore, 0), toNumber(duplicate.masteryScore, 0));
+    primary.lastSeen = safeString(primary.lastSeen) > safeString(duplicate.lastSeen) ? primary.lastSeen : duplicate.lastSeen;
+    primary.examples = mergeUniqueStrings(primary.examples, duplicate.examples, 3);
+    primary.tags = mergeUniqueStrings(primary.tags, duplicate.tags);
+    primary.history = Array.isArray(primary.history) ? primary.history : [];
+    if (Array.isArray(duplicate.history)) {
+      primary.history = [...primary.history, ...duplicate.history];
+    }
+    primary.translation = primary.translation || duplicate.translation || '';
+    primary.difficulty = primary.difficulty || duplicate.difficulty || '';
+    primary.source = primary.source || duplicate.source || '';
+    primary.audioId = primary.audioId || duplicate.audioId || null;
+    primary.audioName = primary.audioName || duplicate.audioName || '';
+    return primary;
+  }
+
+  function dedupeWordBookEntries(entries) {
+    const byWord = new Map();
+    entries.forEach(rawEntry => {
+      const entry = normalizeWordBookEntryForBackup(rawEntry);
+      const key = getWordImportKey(entry);
+      if (!key) return;
+      if (byWord.has(key)) {
+        mergeWordBookEntries(byWord.get(key), entry);
+      } else {
+        byWord.set(key, entry);
+      }
+    });
+    return Array.from(byWord.values());
+  }
+
   async function exportBackup() {
     try {
       const audioEntries = await getAllAudioEntries();
@@ -790,8 +870,10 @@ function getAudioUrl(audioId) {
       const text = await file.text();
       const data = JSON.parse(text);
       const result = await importBackup(data);
-      elements.backupStatus.textContent = `备份已导入，新增 ${result.importedCount} 篇，覆盖 ${result.overwrittenCount} 篇。`;
+      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词。`;
       renderArticleList();
+      renderWordBookPage();
+      showReport();
       showSection('list');
     } catch (error) {
       elements.backupStatus.textContent = `导入失败：${error.message}`;
@@ -847,57 +929,35 @@ function getAudioUrl(audioId) {
       }
     }
 
-    const importedWords = Array.isArray(data.wordBook) ? data.wordBook : [];
-    importedWords.map(normalizeWordBookEntryForBackup).forEach(entry => {
-      if (!entry.word) return;
-      const key = entry.word.trim().toLowerCase();
-      let existing = wordBook.find(item => item.word.trim().toLowerCase() === key);
-      if (!existing) {
-        existing = {
-          id: entry.id || generateId(),
-          word: entry.word,
-          translation: entry.translation || '',
-          difficulty: entry.difficulty || '',
-          source: entry.source || '',
-          tags: Array.isArray(entry.tags) ? entry.tags : (entry.tags ? [entry.tags] : []),
-          count: entry.count || 0,
-          lastSeen: entry.lastSeen || new Date().toISOString(),
-          examples: Array.isArray(entry.examples) ? entry.examples.slice(0, 3) : [],
-          masteryScore: typeof entry.masteryScore === 'number' ? entry.masteryScore : (entry.score || 0),
-          reviewCount: typeof entry.reviewCount === 'number' ? entry.reviewCount : 0,
-          audioId: entry.audioId || null,
-          audioName: entry.audioName || '',
-          history: Array.isArray(entry.history) ? entry.history : [],
-        };
-        wordBook.push(existing);
-        return;
-      }
+    wordBook = dedupeWordBookEntries(wordBook);
+    const existingWordsByKey = new Map(wordBook.map(item => [getWordImportKey(item), item]));
+    const importedWords = dedupeWordBookEntries(Array.isArray(data.wordBook) ? data.wordBook : []);
+    let wordImportedCount = 0;
+    let wordOverwrittenCount = 0;
 
-      if (entry.id && !existing.id) existing.id = entry.id;
-      existing.translation = entry.translation || existing.translation || '';
-      existing.difficulty = entry.difficulty || existing.difficulty || '';
-      existing.source = entry.source || existing.source || '';
-      existing.tags = Array.isArray(entry.tags)
-        ? Array.from(new Set([...(existing.tags || []), ...entry.tags]))
-        : existing.tags;
-      existing.count = Math.max(existing.count || 0, entry.count || 0);
-      existing.lastSeen = existing.lastSeen > (entry.lastSeen || existing.lastSeen) ? existing.lastSeen : (entry.lastSeen || existing.lastSeen);
-      existing.masteryScore = typeof entry.masteryScore === 'number' ? Math.max(existing.masteryScore || 0, entry.masteryScore) : existing.masteryScore;
-      existing.reviewCount = Math.max(existing.reviewCount || 0, entry.reviewCount || 0);
-      existing.audioId = entry.audioId || existing.audioId || null;
-      existing.audioName = entry.audioName || existing.audioName || '';
-      existing.history = Array.isArray(entry.history) ? Array.from(new Set([...(existing.history || []), ...entry.history])) : existing.history;
-      (entry.examples || []).forEach(example => {
-        if (!existing.examples.includes(example)) {
-          existing.examples.unshift(example);
+    for (const entry of importedWords) {
+      const key = getWordImportKey(entry);
+      if (!key) continue;
+      const existing = existingWordsByKey.get(key);
+      if (existing) {
+        const oldAudioId = existing.audioId;
+        const existingId = existing.id;
+        Object.assign(existing, entry);
+        existing.id = existingId || entry.id || generateId();
+        if (oldAudioId && oldAudioId !== existing.audioId) {
+          await deleteAudio(oldAudioId);
         }
-      });
-      if ((existing.examples || []).length > 3) existing.examples.length = 3;
-    });
+        wordOverwrittenCount += 1;
+      } else {
+        wordBook.push(entry);
+        existingWordsByKey.set(key, entry);
+        wordImportedCount += 1;
+      }
+    }
     wordBook.sort((a, b) => b.count - a.count || new Date(b.lastSeen) - new Date(a.lastSeen));
     saveWordBook();
     saveArticles();
-    return { importedCount, overwrittenCount };
+    return { importedCount, overwrittenCount, wordImportedCount, wordOverwrittenCount };
   }
 
   function downloadJson(value, filename) {
@@ -976,6 +1036,7 @@ function startReview(articleId, focusSentenceId = null, onlyIncorrect = false) {
 
   clearReviewSummary();
   if (elements.endReview) elements.endReview.textContent = '结束复习';
+  startReviewTimer();
   renderReviewItem();
   showSection('review');
 }
@@ -1110,8 +1171,9 @@ function handleSubmitAnswer() {
     showFeedback(`得分：${score}% 。已累计复习 ${word.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
     elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
     renderWordReviewResult(word, score, answer);
+    elements.submitAnswer.disabled = true;
     if (currentReview.doneIds.size >= currentReview.wordIds.length) {
-      showFeedback('本轮错词已全部提交，点击“完成复习”查看总结。', 'success');
+      completeReview();
     }
     return;
   }
@@ -1155,9 +1217,10 @@ function handleSubmitAnswer() {
   showFeedback(`得分：${score}% 。已累计复习 ${sentence.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
   elements.quizMastery.textContent = `${Math.round(article?.masteryScore || 0)}%`;
   renderSentenceMistakeSummary(sentence, article, currentReview.lastWrongPairs || [], answer);
+  elements.submitAnswer.disabled = true;
 
   if (currentReview.doneIds.size >= currentReview.sentenceIds.length) {
-    showFeedback('本篇文章已全部提交，点击“完成复习”查看总结。', 'success');
+    completeReview();
   }
 }
 
@@ -1798,8 +1861,10 @@ function startWordReview(wordId = null) {
     index: 0,
     doneIds: new Set(),
     sessionScores: [],
+    startTime: Date.now(),
   };
   if (elements.endReview) elements.endReview.textContent = '结束复习';
+  startReviewTimer();
   showSection('review');
   renderReviewItem();
 }
@@ -1823,21 +1888,31 @@ function showFeedback(message, type = 'info') {
 function completeReview() {
   if (!currentReview || currentReview.completed) return;
   currentReview.completed = true;
+  stopReviewTimer();
   const summary = {
     total: currentReview.type === 'word' ? currentReview.wordIds.length : currentReview.sentenceIds.length,
-    scores: currentReview.sessionScores.map(item => ({ sentence: item.sentence, score: item.score })),
+    completedCount: currentReview.doneIds ? currentReview.doneIds.size : currentReview.sessionScores.length,
+    isPartial: currentReview.doneIds ? currentReview.doneIds.size < (currentReview.type === 'word' ? currentReview.wordIds.length : currentReview.sentenceIds.length) : false,
+    scores: currentReview.sessionScores.map(item => ({
+      sentence: item.sentence,
+      score: item.score,
+      answer: item.answer || '',
+      correctText: item.correctText || item.sentence,
+    })),
     average: currentReview.sessionScores.length
       ? Math.round(currentReview.sessionScores.reduce((sum, item) => sum + item.score, 0) / currentReview.sessionScores.length)
       : 0,
     wrongWords: wordBook.slice(0, 10),
   };
+  if (currentReview.startTime) {
+    summary.duration = Date.now() - currentReview.startTime;
+  }
 
   // Record review time (sentence review only, not word review)
   if (!currentReview.type && currentReview.startTime) {
     const article = findArticle(currentReview.articleId);
     if (article) {
-      const duration = Date.now() - currentReview.startTime;
-      summary.duration = duration;
+      const duration = summary.duration;
       article.reviewTimes = article.reviewTimes || [];
       article.reviewSessions = article.reviewSessions || [];
       article.reviewTimes.push(duration);
@@ -1888,7 +1963,29 @@ function clearReviewSummary() {
 
 function renderReviewSummary(summary) {
   if (!elements.reviewSummary) return;
-  const lines = summary.scores.map(item => `【${item.score}%】 ${escapeHtml(item.sentence)}`);
+  const incorrectItems = summary.scores.filter(item => item.score < 90);
+  const lines = summary.scores.map(item => `
+    <div>
+      <strong>【${item.score}%】</strong> ${escapeHtml(item.sentence)}
+    </div>
+  `).join('');
+  const mistakeHtml = incorrectItems.length
+    ? `<div class="review-summary-block">
+        <h4>本次错误总结</h4>
+        ${incorrectItems.map(item => `
+          <div class="review-sentence-compare">
+            <div class="review-sentence-row review-sentence-original">
+              <div class="review-sentence-label">正确文本</div>
+              <div class="review-sentence-text">${escapeHtml(item.correctText)}</div>
+            </div>
+            <div class="review-sentence-row review-sentence-user">
+              <div class="review-sentence-label">你的输入</div>
+              <div class="review-sentence-text">${escapeHtml(item.answer || '（未填写）')}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>`
+    : '<div class="review-summary-note">本次没有低于 90 分的句子或词语。</div>';
   const wordBookHtml = summary.wrongWords.length
     ? `<div class="review-word-book"><h4>近期错词</h4>${summary.wrongWords.slice(0, 5).map(item => `<div>${escapeHtml(item.word)} (${item.count})</div>`).join('')}</div>`
     : '<div class="empty-state">暂无错词。</div>';
@@ -1896,12 +1993,14 @@ function renderReviewSummary(summary) {
   const durationText = summary.duration ? `本次用时：${formatDuration(summary.duration)}` : '';
   elements.reviewSummary.innerHTML = `
     <div class="review-summary-header">
-      <h3>复习完成</h3>
+      <h3>${summary.isPartial ? '本轮复习总结' : '复习完成'}</h3>
       <div class="review-summary-score">平均得分：${summary.average}%</div>
     </div>
     <div class="review-summary-body">
       ${durationText ? `<div class="review-summary-duration">${durationText}</div>` : ''}
-      <div class="review-summary-list">${lines.join('')}</div>
+      <div class="review-summary-note">本次已复习 ${summary.completedCount} / ${summary.total} 项，低分项 ${incorrectItems.length} 项。</div>
+      <div class="review-summary-list">${lines}</div>
+      ${mistakeHtml}
       ${wordBookHtml}
     </div>
   `;
@@ -2113,7 +2212,7 @@ function renderArticleList() {
     statLine.className = 'article-card-stats';
     statLine.innerHTML = `
       <span>句子 ${stats.sentenceCount}</span>
-      <span>完整复习 ${stats.sessionCount} 次</span>
+      <span>复习轮次 ${stats.sessionCount} 次</span>
       <span>今天用时 ${formatDuration(stats.todayMs)}</span>
       <span>平均用时 ${formatDuration(stats.avgTimeMs)}</span>
       <span>正确率 ${stats.accuracy}%</span>
