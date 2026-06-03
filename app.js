@@ -1359,9 +1359,28 @@ function showReport() {
     const totalWordReviews = wordBook.reduce((sum, item) => sum + (item.reviewCount || 0), 0);
     const totalArticleReviews = articles.reduce((sum, article) => sum + (article.reviewCount || 0), 0);
     const totalSentenceCount = articles.reduce((sum, article) => sum + ((article.sentences || []).length), 0);
-    const allReviewDurations = articles.reduce((all, article) => all.concat(article.reviewTimes || []), []);
-    const totalDurationsMs = allReviewDurations.reduce((sum, d) => sum + d, 0);
-    const totalSessions = allReviewDurations.length;
+    const timedReviewSessions = [];
+    const legacyReviewDurations = [];
+    articles.forEach(article => {
+      const sessions = Array.isArray(article.reviewSessions)
+        ? article.reviewSessions
+            .map(session => ({
+              timestamp: session.timestamp,
+              duration: toNumber(session.duration, 0),
+              articleId: article.id,
+            }))
+            .filter(session => session.duration > 0 && !Number.isNaN(new Date(session.timestamp).getTime()))
+        : [];
+      if (sessions.length) {
+        timedReviewSessions.push(...sessions);
+      } else {
+        legacyReviewDurations.push(...(article.reviewTimes || []).filter(time => typeof time === 'number' && Number.isFinite(time)));
+      }
+    });
+    const timedDurationsMs = timedReviewSessions.reduce((sum, session) => sum + session.duration, 0);
+    const legacyDurationsMs = legacyReviewDurations.reduce((sum, duration) => sum + duration, 0);
+    const totalDurationsMs = timedDurationsMs + legacyDurationsMs;
+    const totalSessions = timedReviewSessions.length + legacyReviewDurations.length;
     // Gather all sentence-level history entries (with timestamps)
     const allHistoryEntries = articles.reduce((out, article) => {
       (article.sentences || []).forEach(s => {
@@ -1370,7 +1389,6 @@ function showReport() {
       return out;
     }, []);
     const totalReviewEvents = allHistoryEntries.length;
-    const avgDurationPerEventMs = totalReviewEvents ? Math.round(totalDurationsMs / totalReviewEvents) : (totalSessions ? Math.round(totalDurationsMs / totalSessions) : 0);
 
     // time window helpers
     const now = new Date();
@@ -1378,19 +1396,23 @@ function showReport() {
       return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
     }
     function dateKey(d) {
-      return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+      return getLocalDateKey(d);
     }
 
     const oneDayMs = 24 * 60 * 60 * 1000;
-    const eventsToday = allHistoryEntries.filter(h => { const t = new Date(h.timestamp); return isSameDay(t, now); }).length;
-    const eventsLast7 = allHistoryEntries.filter(h => { const t = new Date(h.timestamp); return (now - t) <= 7 * oneDayMs; }).length;
-    const eventsLast30 = allHistoryEntries.filter(h => { const t = new Date(h.timestamp); return (now - t) <= 30 * oneDayMs; }).length;
+    const sessionsToday = timedReviewSessions.filter(session => isSameDay(new Date(session.timestamp), now));
+    const sessionsLast7 = timedReviewSessions.filter(session => { const t = new Date(session.timestamp); return (now - t) <= 7 * oneDayMs; });
+    const sessionsLast30 = timedReviewSessions.filter(session => { const t = new Date(session.timestamp); return (now - t) <= 30 * oneDayMs; });
+    const studyTodayMs = sessionsToday.reduce((sum, session) => sum + session.duration, 0);
+    const study7Ms = sessionsLast7.reduce((sum, session) => sum + session.duration, 0);
+    const study30Ms = sessionsLast30.reduce((sum, session) => sum + session.duration, 0);
+    const avgPerDayMs = Math.round(study30Ms / 30);
 
-    const activeDaysSet = new Set(allHistoryEntries.filter(h => { const t = new Date(h.timestamp); return (now - t) <= 30 * oneDayMs; }).map(h => dateKey(new Date(h.timestamp))));
+    const activeDaysSet = new Set(sessionsLast30.map(session => dateKey(new Date(session.timestamp))));
     const activeDays = activeDaysSet.size;
 
     // streaks calculation
-    const allDaysSet = new Set(allHistoryEntries.map(h => dateKey(new Date(h.timestamp))));
+    const allDaysSet = new Set(timedReviewSessions.map(session => dateKey(new Date(session.timestamp))));
     // current streak: count backward from today while date exists in allDaysSet
     let currentStreak = 0;
     for (let i = 0; ; i++) {
@@ -1415,19 +1437,15 @@ function showReport() {
       longestStreak = Math.max(longestStreak, streak);
     }
 
-    // Map durations from event counts
-    const studyTodayMs = eventsToday * avgDurationPerEventMs;
-    const study7Ms = eventsLast7 * avgDurationPerEventMs;
-    const study30Ms = eventsLast30 * avgDurationPerEventMs;
-    const avgPerDayMs = Math.round((eventsLast30 * avgDurationPerEventMs) / 30);
-
     // build last-30-days per-day durations (ms)
     const dailyDurations = [];
     for (let i = 29; i >= 0; i--) {
       const d = new Date(now.getTime() - i * oneDayMs);
       const key = dateKey(d);
-      const count = allHistoryEntries.filter(h => dateKey(new Date(h.timestamp)) === key).length;
-      dailyDurations.push({ date: key, ms: count * avgDurationPerEventMs });
+      const ms = timedReviewSessions
+        .filter(session => dateKey(new Date(session.timestamp)) === key)
+        .reduce((sum, session) => sum + session.duration, 0);
+      dailyDurations.push({ date: key, ms });
     }
 
     // render simple SVG bar chart for study time
