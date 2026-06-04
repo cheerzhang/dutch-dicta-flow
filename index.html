@@ -151,41 +151,46 @@
         </div>
         <div id="wordbook-list" class="wordbook-list"></div>
       </div>
-      <section id="wordbook-edit-panel" class="card hidden wordbook-edit-panel">
-        <h3>编辑错词</h3>
-        <form id="wordbook-edit-form">
-          <div class="field-row">
-            <label>错词</label>
-            <input type="text" id="wordbook-edit-word" disabled />
+      <section id="wordbook-edit-panel" class="hidden wordbook-edit-panel" role="dialog" aria-modal="true" aria-labelledby="wordbook-edit-title">
+        <div class="wordbook-edit-dialog">
+          <div class="wordbook-edit-header">
+            <h3 id="wordbook-edit-title">编辑错词</h3>
+            <button type="button" id="wordbook-edit-cancel" class="btn btn-small btn-secondary">关闭</button>
           </div>
-          <div class="field-row">
-            <label>中文说明</label>
-            <textarea id="wordbook-edit-translation" rows="2" placeholder="例如：税务、缴税"></textarea>
-          </div>
-          <div class="field-row two-column">
-            <div>
-              <label>难度</label>
-              <input type="text" id="wordbook-edit-difficulty" placeholder="例如：B1, 高频词" />
+          <form id="wordbook-edit-form">
+            <div class="field-row">
+              <label>错词</label>
+              <input type="text" id="wordbook-edit-word" disabled />
             </div>
-            <div>
-              <label>来源文章</label>
-              <input type="text" id="wordbook-edit-source" placeholder="例如：文章标题或来源" />
+            <div class="field-row">
+              <label>中文说明</label>
+              <textarea id="wordbook-edit-translation" rows="2" placeholder="例如：税务、缴税"></textarea>
             </div>
-          </div>
-          <div class="field-row">
-            <label>标签</label>
-            <input type="text" id="wordbook-edit-tags" placeholder="逗号分隔的标签，例如：高频, 商务" />
-          </div>
-          <div class="field-row">
-            <label>上传音频</label>
-            <input type="file" id="wordbook-edit-audio" accept="audio/*" />
-            <div id="wordbook-edit-audio-info" class="audio-info">如果不修改音频则保持当前音频。</div>
-          </div>
-          <div class="sentence-actions">
-            <button type="submit" class="btn btn-primary">保存错词</button>
-            <button type="button" id="wordbook-edit-cancel" class="btn btn-secondary">取消</button>
-          </div>
-        </form>
+            <div class="field-row two-column">
+              <div>
+                <label>难度</label>
+                <input type="text" id="wordbook-edit-difficulty" placeholder="例如：B1, 高频词" />
+              </div>
+              <div>
+                <label>来源文章</label>
+                <input type="text" id="wordbook-edit-source" placeholder="例如：文章标题或来源" />
+              </div>
+            </div>
+            <div class="field-row">
+              <label>标签</label>
+              <input type="text" id="wordbook-edit-tags" placeholder="逗号分隔的标签，例如：高频, 商务" />
+            </div>
+            <div class="field-row">
+              <label>上传音频</label>
+              <input type="file" id="wordbook-edit-audio" accept="audio/*" />
+              <div id="wordbook-edit-audio-info" class="audio-info">如果不修改音频则保持当前音频。</div>
+            </div>
+            <div class="sentence-actions">
+              <button type="submit" class="btn btn-primary">保存错词</button>
+              <button type="button" class="btn btn-secondary wordbook-edit-close-btn">取消</button>
+            </div>
+          </form>
+        </div>
       </section>
     </section>
     <section class="card hidden" id="backup-panel">
@@ -196,7 +201,12 @@
       </div>
       <div class="field-row">
         <label>导入备份 JSON</label>
-        <input id="backup-import" type="file" accept=".json" />
+        <div id="backup-drop-zone" class="backup-drop-zone" role="button" tabindex="0" aria-label="导入备份 JSON 文件">
+          <input id="backup-import" class="backup-file-input" type="file" accept=".json,application/json" tabindex="-1" />
+          <div class="backup-drop-icon">JSON</div>
+          <div class="backup-drop-title">拖拽备份文件到这里</div>
+          <div class="backup-drop-text">或点击选择一个 .json 备份文件导入</div>
+        </div>
       </div>
       <p id="backup-status" class="help-text"></p>
     </section>

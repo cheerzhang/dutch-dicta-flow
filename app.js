@@ -41,6 +41,7 @@ const elements = {
   backupPanel: document.getElementById('backup-panel'),
   backupExport: document.getElementById('backup-export'),
   backupImport: document.getElementById('backup-import'),
+  backupDropZone: document.getElementById('backup-drop-zone'),
   backupStatus: document.getElementById('backup-status'),
   pageNavButtons: document.querySelectorAll('.page-nav .nav-btn'),
   startReview: document.getElementById('start-review'),
@@ -140,6 +141,13 @@ function bindEvents() {
   if (elements.wordbookEditCancel) {
     elements.wordbookEditCancel.addEventListener('click', closeWordBookEditPanel);
   }
+  if (elements.wordbookEditPanel) {
+    elements.wordbookEditPanel.addEventListener('click', event => {
+      if (event.target === elements.wordbookEditPanel || event.target.closest('.wordbook-edit-close-btn')) {
+        closeWordBookEditPanel();
+      }
+    });
+  }
   if (elements.wordbookList) {
     elements.wordbookList.addEventListener('click', handleWordbookListClick);
   }
@@ -169,11 +177,33 @@ function bindEvents() {
   }
   if (elements.backupImport) {
     elements.backupImport.addEventListener('change', handleBackupImport);
+    elements.backupImport.addEventListener('click', event => event.stopPropagation());
+  }
+  if (elements.backupDropZone) {
+    elements.backupDropZone.addEventListener('click', () => elements.backupImport?.click());
+    elements.backupDropZone.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        elements.backupImport?.click();
+      }
+    });
+    ['dragenter', 'dragover'].forEach(type => {
+      elements.backupDropZone.addEventListener(type, handleBackupDrag);
+    });
+    ['dragleave', 'drop'].forEach(type => {
+      elements.backupDropZone.addEventListener(type, handleBackupDrag);
+    });
+    elements.backupDropZone.addEventListener('drop', handleBackupDrop);
   }
   const navButtons = document.querySelectorAll('.page-nav .nav-btn');
   if (navButtons && navButtons.forEach) {
     navButtons.forEach(btn => btn.addEventListener('click', handlePageNav));
   }
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && elements.wordbookEditPanel && !elements.wordbookEditPanel.classList.contains('hidden')) {
+      closeWordBookEditPanel();
+    }
+  });
 }
 
 let playAllState = {
@@ -872,10 +902,38 @@ function getAudioUrl(audioId) {
     }
   }
 
+  function handleBackupDrag(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!elements.backupDropZone) return;
+    const isActive = event.type === 'dragenter' || event.type === 'dragover';
+    elements.backupDropZone.classList.toggle('drag-active', isActive);
+  }
+
+  async function handleBackupDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (elements.backupDropZone) {
+      elements.backupDropZone.classList.remove('drag-active');
+    }
+    const file = event.dataTransfer?.files?.[0];
+    await importBackupFile(file);
+  }
+
   async function handleBackupImport(event) {
     const file = event.target.files[0];
+    await importBackupFile(file);
+    elements.backupImport.value = '';
+  }
+
+  async function importBackupFile(file) {
     if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.json') && file.type !== 'application/json') {
+      elements.backupStatus.textContent = '导入失败：请选择 JSON 备份文件。';
+      return;
+    }
     try {
+      elements.backupStatus.textContent = `正在导入：${file.name}`;
       const text = await file.text();
       const data = JSON.parse(text);
       const result = await importBackup(data);
@@ -886,8 +944,6 @@ function getAudioUrl(audioId) {
       showSection('list');
     } catch (error) {
       elements.backupStatus.textContent = `导入失败：${error.message}`;
-    } finally {
-      elements.backupImport.value = '';
     }
   }
 
@@ -1465,7 +1521,16 @@ function showReport() {
     const studyTodayMs = sessionsToday.reduce((sum, session) => sum + session.duration, 0);
     const study7Ms = sessionsLast7.reduce((sum, session) => sum + session.duration, 0);
     const study30Ms = sessionsLast30.reduce((sum, session) => sum + session.duration, 0);
-    const avgPerDayMs = Math.round(study30Ms / 30);
+    const firstStudyDate = timedReviewSessions.length
+      ? timedReviewSessions
+          .map(session => new Date(session.timestamp))
+          .filter(date => !Number.isNaN(date.getTime()))
+          .sort((a, b) => a - b)[0]
+      : null;
+    const studyDaySpan = firstStudyDate
+      ? Math.max(1, Math.floor((new Date(dateKey(now)) - new Date(dateKey(firstStudyDate))) / oneDayMs) + 1)
+      : 1;
+    const avgPerDayMs = totalDurationsMs ? Math.round(totalDurationsMs / studyDaySpan) : 0;
 
     const activeDaysSet = new Set(sessionsLast30.map(session => dateKey(new Date(session.timestamp))));
     const activeDays = activeDaysSet.size;
@@ -1797,12 +1862,15 @@ function openWordBookEditPanel(id) {
   }
   elements.wordbookEditAudioInfo.textContent = entry.audioName ? `当前音频：${entry.audioName}` : '当前无音频。';
   elements.wordbookEditPanel.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  elements.wordbookEditTranslation?.focus();
 }
 
 function closeWordBookEditPanel() {
   if (!elements.wordbookEditPanel) return;
   selectedWordBookId = null;
   elements.wordbookEditPanel.classList.add('hidden');
+  document.body.classList.remove('modal-open');
   if (elements.wordbookEditForm) elements.wordbookEditForm.reset();
   if (elements.wordbookEditAudioInfo) elements.wordbookEditAudioInfo.textContent = '如果不修改音频则保持当前音频。';
 }
@@ -1871,14 +1939,50 @@ function renderWordBookPage() {
     return;
   }
 
-  elements.wordbookList.innerHTML = wordBook.slice().sort((a, b) => b.count - a.count).map(item => `
-    <div class="wordbook-card" data-word-id="${item.id}">
+  const sortedWords = wordBook.slice().sort((a, b) => b.count - a.count || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0));
+  const activeWords = sortedWords.filter(item => toNumber(item.masteryScore, 0) < 100);
+  const masteredWords = sortedWords.filter(item => toNumber(item.masteryScore, 0) >= 100);
+  const renderGroup = (title, count, items, type) => `
+    <section class="wordbook-group wordbook-group-${type}">
+      <div class="wordbook-group-header">
+        <h4>${title}</h4>
+        <span>${count} 个</span>
+      </div>
+      ${items.length
+        ? `<div class="wordbook-group-grid">${items.map(item => renderWordBookCard(item, type === 'mastered')).join('')}</div>`
+        : `<div class="empty-state">${type === 'mastered' ? '还没有 100% 熟练度的单词。' : '当前没有待掌握的错词。'}</div>`}
+    </section>
+  `;
+
+  elements.wordbookList.innerHTML = `
+    ${renderGroup('待掌握单词', activeWords.length, activeWords, 'active')}
+    ${renderGroup('已掌握单词', masteredWords.length, masteredWords, 'mastered')}
+  `;
+
+}
+
+function renderWordBookCard(item, isMastered = false) {
+  const mastery = Math.round(toNumber(item.masteryScore, 0));
+  if (isMastered) {
+    return `
+      <div class="wordbook-card mastered compact" data-word-id="${item.id}">
+        <div class="wordbook-card-header">
+          <div class="wordbook-word">${escapeHtml(item.word)}</div>
+          <div class="wordbook-mastery">${mastery}%</div>
+        </div>
+        <div class="wordbook-mastered-meta">${escapeHtml(item.translation || item.source || '已掌握')}</div>
+        <button type="button" class="btn btn-small btn-danger wordbook-delete-btn">删除</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="wordbook-card active" data-word-id="${item.id}">
       <div class="wordbook-card-header">
         <div class="wordbook-word">${escapeHtml(item.word)}</div>
-        <div class="wordbook-mastery">${Math.round(item.masteryScore || 0)}%</div>
+        <div class="wordbook-mastery">${mastery}%</div>
       </div>
       <div class="wordbook-progress">
-        <div class="wordbook-progress-fill" style="width:${Math.round(item.masteryScore || 0)}%"></div>
+        <div class="wordbook-progress-fill" style="width:${Math.min(100, mastery)}%"></div>
       </div>
       <div class="wordbook-meta">难度：${escapeHtml(item.difficulty || '未设置')} · 错题次数：${item.count} · 来源：${escapeHtml(item.source || '未知')}</div>
       ${item.tags && item.tags.length ? `<div class="wordbook-tags">标签：${escapeHtml(item.tags.join(', '))}</div>` : ''}
@@ -1890,8 +1994,7 @@ function renderWordBookPage() {
         <button type="button" class="btn btn-small btn-danger wordbook-delete-btn">删除</button>
       </div>
     </div>
-  `).join('');
-
+  `;
 }
 
 function handleWordbookListClick(event) {
@@ -1919,6 +2022,10 @@ function handleWordbookListClick(event) {
     const entry = wordBook.find(item => String(item.id) === String(id));
     if (!entry || !entry.audioId) return;
     getAudioUrl(entry.audioId).then(url => new Audio(url).play()).catch(() => {});
+    return;
+  }
+
+  if (card.classList.contains('mastered')) {
     return;
   }
 
@@ -2214,10 +2321,15 @@ function escapeHtml(unsafe) {
 function formatDuration(ms) {
   if (typeof ms !== 'number' || ms < 0) return '0秒';
   const seconds = Math.round(ms / 1000);
+  const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
+  if (hours > 0) {
+    const minutesAfterHour = Math.floor((seconds % 3600) / 60);
+    return minutesAfterHour > 0 ? `${hours}小时${minutesAfterHour}分` : `${hours}小时`;
+  }
   if (minutes > 0) {
-    return `${minutes}分${remainder}秒`;
+    return remainder > 0 ? `${minutes}分${remainder}秒` : `${minutes}分`;
   }
   return `${remainder}秒`;
 }
