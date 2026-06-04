@@ -574,10 +574,23 @@ button {
 .sentence-actions,
 .review-actions,
 .wordbook-actions,
+.wordbook-review-controls,
 .sentence-actions-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.wordbook-review-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, max-content));
+  align-items: center;
+  justify-content: start;
+  gap: 10px;
+}
+
+.wordbook-review-controls .btn {
+  width: auto;
 }
 
 .review-actions {
@@ -1607,6 +1620,14 @@ button {
   .sentence-actions .btn,
   .review-actions .btn,
   .sentence-controls .btn {
+    width: 100%;
+  }
+
+  .wordbook-review-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .wordbook-review-controls .btn {
     width: 100%;
   }
 

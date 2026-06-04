@@ -60,6 +60,7 @@ const elements = {
   wordbookPendingReview: document.getElementById('wordbook-pending-review'),
   wordbookList: document.getElementById('wordbook-list'),
   wordbookReviewAll: document.getElementById('wordbook-review-all'),
+  wordbookReviewUnmastered: document.getElementById('wordbook-review-unmastered'),
   wordbookEditPanel: document.getElementById('wordbook-edit-panel'),
   wordbookEditForm: document.getElementById('wordbook-edit-form'),
   startIncorrectReview: document.getElementById('start-incorrect-review'),
@@ -129,6 +130,9 @@ function bindEvents() {
   }
   if (elements.wordbookReviewAll) {
     elements.wordbookReviewAll.addEventListener('click', () => startWordReview());
+  }
+  if (elements.wordbookReviewUnmastered) {
+    elements.wordbookReviewUnmastered.addEventListener('click', () => startWordReview(null, { onlyUnmastered: true }));
   }
   if (elements.wordbookEditForm) {
     elements.wordbookEditForm.addEventListener('submit', handleWordBookEditSubmit);
@@ -357,9 +361,10 @@ function showSection(mode) {
 
 function handleEndReview() {
   if (currentReview && currentReview.completed) {
+    const returnPage = currentReview.returnPage || 'list';
     stopReviewTimer();
     currentReview = null;
-    showSection('list');
+    showSection(returnPage);
     return;
   }
   if (currentReview) {
@@ -367,11 +372,15 @@ function handleEndReview() {
       completeReview();
       return;
     }
-    if (!confirm('当前复习还没有提交任何内容，确定要结束并回到首页吗？')) {
+    const returnLabel = currentReview.returnPage === 'wordbook' ? '错题本' : '文章列表';
+    if (!confirm(`当前复习还没有提交任何内容，确定要结束并回到${returnLabel}吗？`)) {
       return;
     }
+    const returnPage = currentReview.returnPage || 'list';
     stopReviewTimer();
     currentReview = null;
+    showSection(returnPage);
+    return;
   }
   showSection('list');
 }
@@ -1027,6 +1036,7 @@ function startReview(articleId, focusSentenceId = null, onlyIncorrect = false) {
     sessionScores: [],
     startTime: now,
     onlyIncorrect,
+    returnPage: 'list',
   };
 
   if (focusSentenceId) {
@@ -1333,6 +1343,63 @@ function getWrongSentenceSummaries() {
   return wrong.sort((a, b) => b.wrongAttempts - a.wrongAttempts || a.score - b.score || new Date(b.lastReviewed) - new Date(a.lastReviewed));
 }
 
+function getLatestArticleActivityTimestamp(article) {
+  const timestamps = [];
+  if (Array.isArray(article.reviewSessions)) {
+    article.reviewSessions.forEach(session => {
+      if (session && session.timestamp) timestamps.push(session.timestamp);
+    });
+  }
+  (article.sentences || []).forEach(sentence => {
+    if (sentence.lastReviewed) timestamps.push(sentence.lastReviewed);
+    (sentence.history || []).forEach(entry => {
+      if (entry.timestamp) timestamps.push(entry.timestamp);
+    });
+  });
+  if (article.updatedAt) timestamps.push(article.updatedAt);
+
+  return timestamps
+    .map(timestamp => new Date(timestamp))
+    .filter(date => !Number.isNaN(date.getTime()))
+    .sort((a, b) => b - a)[0]?.toISOString() || '';
+}
+
+function getArticleReviewSessions(article) {
+  const savedSessions = Array.isArray(article.reviewSessions)
+    ? article.reviewSessions
+        .map(session => ({
+          timestamp: session.timestamp,
+          duration: toNumber(session.duration, 0),
+          articleId: article.id,
+        }))
+        .filter(session => session.duration > 0 && !Number.isNaN(new Date(session.timestamp).getTime()))
+    : [];
+  const reviewTimes = (article.reviewTimes || []).filter(time => typeof time === 'number' && Number.isFinite(time) && time > 0);
+
+  if (reviewTimes.length) {
+    const startIndex = Math.max(0, savedSessions.length - reviewTimes.length);
+    reviewTimes.slice(0, savedSessions.length).forEach((duration, index) => {
+      const session = savedSessions[startIndex + index];
+      if (session) session.duration = duration;
+    });
+  }
+
+  if (reviewTimes.length > savedSessions.length) {
+    const fallbackTimestamp = getLatestArticleActivityTimestamp(article);
+    const missingDurations = reviewTimes.slice(savedSessions.length);
+    if (fallbackTimestamp) {
+      savedSessions.push(...missingDurations.map(duration => ({
+        timestamp: fallbackTimestamp,
+        duration,
+        articleId: article.id,
+        legacy: true,
+      })));
+    }
+  }
+
+  return savedSessions;
+}
+
 function showReport() {
   const totalArticles = articles.length;
   const totalSentences = articles.reduce((sum, a) => sum + (a.sentences?.length || 0), 0);
@@ -1362,15 +1429,7 @@ function showReport() {
     const timedReviewSessions = [];
     const legacyReviewDurations = [];
     articles.forEach(article => {
-      const sessions = Array.isArray(article.reviewSessions)
-        ? article.reviewSessions
-            .map(session => ({
-              timestamp: session.timestamp,
-              duration: toNumber(session.duration, 0),
-              articleId: article.id,
-            }))
-            .filter(session => session.duration > 0 && !Number.isNaN(new Date(session.timestamp).getTime()))
-        : [];
+      const sessions = getArticleReviewSessions(article);
       if (sessions.length) {
         timedReviewSessions.push(...sessions);
       } else {
@@ -1797,12 +1856,14 @@ function renderWordBookPage() {
   const overall = articles.reduce((sum, article) => sum + (article.sentences?.reduce((ss, sentence) => ss + (sentence.masteryScore || 0), 0) || 0), 0);
   const countScores = articles.reduce((sum, article) => sum + (article.sentences?.length || 0), 0);
   const overallMastery = countScores ? Math.round(overall / countScores) : 0;
-  const pending = wordBook.filter(item => (item.masteryScore || 0) < 90).length;
+  const pending = wordBook.filter(item => toNumber(item.masteryScore, 0) < 100).length;
 
   if (elements.wordbookTotalWords) elements.wordbookTotalWords.textContent = totalWords;
   if (elements.wordbookTotalSentences) elements.wordbookTotalSentences.textContent = wrongSentences.length;
   if (elements.wordbookOverallMastery) elements.wordbookOverallMastery.textContent = `${overallMastery}%`;
   if (elements.wordbookPendingReview) elements.wordbookPendingReview.textContent = pending;
+  if (elements.wordbookReviewAll) elements.wordbookReviewAll.disabled = totalWords === 0;
+  if (elements.wordbookReviewUnmastered) elements.wordbookReviewUnmastered.disabled = pending === 0;
 
   if (!elements.wordbookList) return;
   if (!wordBook.length) {
@@ -1867,10 +1928,14 @@ function handleWordbookListClick(event) {
   }
 }
 
-function startWordReview(wordId = null) {
-  const ids = wordId ? [wordId] : wordBook.map(item => item.id);
+function startWordReview(wordId = null, options = {}) {
+  const ids = wordId
+    ? [wordId]
+    : wordBook
+        .filter(item => !options.onlyUnmastered || toNumber(item.masteryScore, 0) < 100)
+        .map(item => item.id);
   if (!ids.length) {
-    alert('错题本当前没有错词可复习。');
+    alert(options.onlyUnmastered ? '当前没有未掌握的错词可复习。' : '错题本当前没有错词可复习。');
     return;
   }
   currentReview = {
@@ -1880,6 +1945,8 @@ function startWordReview(wordId = null) {
     doneIds: new Set(),
     sessionScores: [],
     startTime: Date.now(),
+    onlyUnmastered: !!options.onlyUnmastered,
+    returnPage: 'wordbook',
   };
   if (elements.endReview) elements.endReview.textContent = '结束复习';
   startReviewTimer();
@@ -1964,7 +2031,8 @@ function completeReview() {
 
   renderReviewSummary(summary);
   if (elements.endReview) elements.endReview.textContent = '关闭';
-  showFeedback('本次复习已完成，查看下方总结或点击“关闭”回到首页。', 'success');
+  const returnLabel = currentReview.returnPage === 'wordbook' ? '错题本' : '首页';
+  showFeedback(`本次复习已完成，查看下方总结或点击“关闭”回到${returnLabel}。`, 'success');
 }
 
 function clearReviewSummary() {
@@ -2176,7 +2244,7 @@ function findArticle(id) {
 function getArticleListStats(article) {
   const sentences = article.sentences || [];
   const reviewTimes = (article.reviewTimes || []).filter(time => typeof time === 'number' && Number.isFinite(time));
-  const reviewSessions = Array.isArray(article.reviewSessions) ? article.reviewSessions : [];
+  const reviewSessions = getArticleReviewSessions(article);
   const todayKey = getLocalDateKey(new Date());
   const todayMs = reviewSessions
     .filter(session => getLocalDateKey(new Date(session.timestamp)) === todayKey)
@@ -2186,11 +2254,16 @@ function getArticleListStats(article) {
     return sum + (sentence.history || []).filter(item => toNumber(item.score, 0) >= 90).length;
   }, 0);
   const accuracy = attempts ? Math.round((correctAttempts / attempts) * 100) : 0;
-  const avgTimeMs = reviewTimes.length ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length) : 0;
+  const sessionDurations = reviewSessions.map(session => toNumber(session.duration, 0)).filter(duration => duration > 0);
+  const avgTimeMs = reviewTimes.length
+    ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length)
+    : sessionDurations.length
+      ? Math.round(sessionDurations.reduce((a, b) => a + b, 0) / sessionDurations.length)
+      : 0;
 
   return {
     sentenceCount: sentences.length,
-    sessionCount: reviewTimes.length,
+    sessionCount: Math.max(reviewTimes.length, reviewSessions.length),
     todayMs,
     avgTimeMs,
     accuracy,
