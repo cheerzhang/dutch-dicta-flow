@@ -40,8 +40,11 @@ const elements = {
   reviewSentenceTagsLabel: document.getElementById('review-sentence-tags'),
   backupPanel: document.getElementById('backup-panel'),
   backupExport: document.getElementById('backup-export'),
+  backupExportZip: document.getElementById('backup-export-zip'),
   backupImport: document.getElementById('backup-import'),
+  backupImportZip: document.getElementById('backup-import-zip'),
   backupDropZone: document.getElementById('backup-drop-zone'),
+  backupZipDropZone: document.getElementById('backup-zip-drop-zone'),
   backupStatus: document.getElementById('backup-status'),
   pageNavButtons: document.querySelectorAll('.page-nav .nav-btn'),
   startReview: document.getElementById('start-review'),
@@ -98,6 +101,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await initDatabase();
   loadArticles();
   loadWordBook();
+  updateBackupEnvironmentControls();
   try {
     if (typeof showSection === 'function') showSection('list');
   } catch (err) {
@@ -109,6 +113,21 @@ window.addEventListener('DOMContentLoaded', async () => {
     console.error('bindEvents error', err);
   }
 });
+
+function isLocalRuntime() {
+  const { protocol, hostname } = window.location;
+  return protocol === 'file:' || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function updateBackupEnvironmentControls() {
+  if (!elements.backupExportZip) return;
+  const allowed = isLocalRuntime();
+  elements.backupExportZip.disabled = !allowed;
+  elements.backupExportZip.title = allowed
+    ? '本地环境可导出完整 ZIP。'
+    : '完整导出只在本地运行时开放；线上可导入完整 ZIP。';
+  elements.backupExportZip.textContent = allowed ? '完整导出 ZIP' : '完整导出 ZIP（仅本地）';
+}
 
 function bindEvents() {
   if (elements.articleForm && typeof handleArticleSubmit === 'function') {
@@ -175,9 +194,16 @@ function bindEvents() {
   if (elements.backupExport && typeof exportBackup === 'function') {
     elements.backupExport.addEventListener('click', exportBackup);
   }
+  if (elements.backupExportZip && typeof exportBackupZip === 'function') {
+    elements.backupExportZip.addEventListener('click', exportBackupZip);
+  }
   if (elements.backupImport) {
     elements.backupImport.addEventListener('change', handleBackupImport);
     elements.backupImport.addEventListener('click', event => event.stopPropagation());
+  }
+  if (elements.backupImportZip) {
+    elements.backupImportZip.addEventListener('change', handleBackupZipImport);
+    elements.backupImportZip.addEventListener('click', event => event.stopPropagation());
   }
   if (elements.backupDropZone) {
     elements.backupDropZone.addEventListener('click', () => elements.backupImport?.click());
@@ -194,6 +220,19 @@ function bindEvents() {
       elements.backupDropZone.addEventListener(type, handleBackupDrag);
     });
     elements.backupDropZone.addEventListener('drop', handleBackupDrop);
+  }
+  if (elements.backupZipDropZone) {
+    elements.backupZipDropZone.addEventListener('click', () => elements.backupImportZip?.click());
+    elements.backupZipDropZone.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        elements.backupImportZip?.click();
+      }
+    });
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(type => {
+      elements.backupZipDropZone.addEventListener(type, handleBackupZipDrag);
+    });
+    elements.backupZipDropZone.addEventListener('drop', handleBackupZipDrop);
   }
   const navButtons = document.querySelectorAll('.page-nav .nav-btn');
   if (navButtons && navButtons.forEach) {
@@ -800,7 +839,7 @@ function getAudioUrl(audioId) {
       title: safeString(source.title).trim(),
       source: safeString(source.source),
       tags: normalizeTagsValue(source.tags || source.tag),
-      sentences: rawSentences.map(normalizeSentenceForBackup).filter(sentence => sentence.text),
+      sentences: dedupeSentencesForBackup(rawSentences.map(normalizeSentenceForBackup).filter(sentence => sentence.text)),
       reviewCount: toNumber(source.reviewCount, 0),
       reviewTimes: Array.isArray(source.reviewTimes) ? source.reviewTimes.filter(time => typeof time === 'number' && Number.isFinite(time)) : [],
       reviewSessions: Array.isArray(source.reviewSessions) ? source.reviewSessions.filter(session => session && typeof session === 'object') : [],
@@ -832,6 +871,38 @@ function getAudioUrl(audioId) {
 
   function getArticleImportKey(article) {
     return `${safeString(article.title).trim().toLowerCase()}|${safeString(article.source).trim().toLowerCase()}`;
+  }
+
+  function getSentenceImportKey(sentence) {
+    return safeString(sentence && sentence.text).trim().toLowerCase();
+  }
+
+  function mergeSentenceEntries(primary, duplicate) {
+    primary.translation = primary.translation || duplicate.translation || '';
+    primary.difficulty = primary.difficulty || duplicate.difficulty || '';
+    primary.tags = mergeUniqueStrings(primary.tags, duplicate.tags);
+    primary.audioId = primary.audioId || duplicate.audioId || null;
+    primary.audioName = primary.audioName || duplicate.audioName || '';
+    primary.masteryScore = Math.max(toNumber(primary.masteryScore, 0), toNumber(duplicate.masteryScore, 0));
+    primary.reviewCount = Math.max(toNumber(primary.reviewCount, 0), toNumber(duplicate.reviewCount, 0));
+    primary.history = [...(Array.isArray(primary.history) ? primary.history : []), ...(Array.isArray(duplicate.history) ? duplicate.history : [])];
+    primary.lastReviewed = safeString(primary.lastReviewed) > safeString(duplicate.lastReviewed) ? primary.lastReviewed : duplicate.lastReviewed;
+    primary.updatedAt = safeString(primary.updatedAt) > safeString(duplicate.updatedAt) ? primary.updatedAt : duplicate.updatedAt;
+    return primary;
+  }
+
+  function dedupeSentencesForBackup(sentences) {
+    const byText = new Map();
+    sentences.forEach(sentence => {
+      const key = getSentenceImportKey(sentence);
+      if (!key) return;
+      if (byText.has(key)) {
+        mergeSentenceEntries(byText.get(key), sentence);
+      } else {
+        byText.set(key, sentence);
+      }
+    });
+    return Array.from(byText.values());
   }
 
   function getWordImportKey(entry) {
@@ -902,6 +973,45 @@ function getAudioUrl(audioId) {
     }
   }
 
+  async function exportBackupZip() {
+    if (!isLocalRuntime()) {
+      elements.backupStatus.textContent = '完整导出 ZIP 只在本地运行时开放；线上环境可以使用完整导入 ZIP。';
+      return;
+    }
+    try {
+      elements.backupStatus.textContent = '正在生成完整 ZIP 备份...';
+      const audioEntries = await getAllAudioEntries();
+      const audioFiles = audioEntries.map(entry => {
+        const type = entry.file.type || 'audio/mpeg';
+        const path = `audio/${sanitizeZipPath(entry.id)}${getAudioExtension(type)}`;
+        return { id: entry.id, type, path, size: entry.file.size || 0 };
+      });
+      const payload = {
+        version: 3,
+        packageType: 'zip',
+        articles: articles.map(normalizeArticleForBackup).filter(article => article.title),
+        wordBook: wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word),
+        audioFiles,
+        exportedAt: new Date().toISOString(),
+      };
+      const files = [
+        {
+          name: 'backup.json',
+          data: new TextEncoder().encode(JSON.stringify(payload, null, 2)),
+        },
+      ];
+      for (let i = 0; i < audioEntries.length; i += 1) {
+        const bytes = new Uint8Array(await audioEntries[i].file.arrayBuffer());
+        files.push({ name: audioFiles[i].path, data: bytes });
+      }
+      const zipBlob = createZipBlob(files);
+      downloadBlob(zipBlob, `dutch-dicta-complete-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`);
+      elements.backupStatus.textContent = `完整备份 ZIP 已生成：包含 ${audioFiles.length} 个音频文件。`;
+    } catch (error) {
+      elements.backupStatus.textContent = `完整备份失败：${error.message}`;
+    }
+  }
+
   function handleBackupDrag(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -920,10 +1030,34 @@ function getAudioUrl(audioId) {
     await importBackupFile(file);
   }
 
+  function handleBackupZipDrag(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!elements.backupZipDropZone) return;
+    const isActive = event.type === 'dragenter' || event.type === 'dragover';
+    elements.backupZipDropZone.classList.toggle('drag-active', isActive);
+  }
+
+  async function handleBackupZipDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (elements.backupZipDropZone) {
+      elements.backupZipDropZone.classList.remove('drag-active');
+    }
+    const file = event.dataTransfer?.files?.[0];
+    await importBackupZipFile(file);
+  }
+
   async function handleBackupImport(event) {
     const file = event.target.files[0];
     await importBackupFile(file);
     elements.backupImport.value = '';
+  }
+
+  async function handleBackupZipImport(event) {
+    const file = event.target.files[0];
+    await importBackupZipFile(file);
+    elements.backupImportZip.value = '';
   }
 
   async function importBackupFile(file) {
@@ -944,6 +1078,40 @@ function getAudioUrl(audioId) {
       showSection('list');
     } catch (error) {
       elements.backupStatus.textContent = `导入失败：${error.message}`;
+    }
+  }
+
+  async function importBackupZipFile(file) {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.zip') && file.type !== 'application/zip') {
+      elements.backupStatus.textContent = '完整导入失败：请选择 ZIP 备份文件。';
+      return;
+    }
+    try {
+      elements.backupStatus.textContent = `正在导入完整备份：${file.name}`;
+      const entries = parseZipEntries(new Uint8Array(await file.arrayBuffer()));
+      const backupEntry = entries.get('backup.json');
+      if (!backupEntry) {
+        throw new Error('ZIP 中找不到 backup.json。');
+      }
+      const data = JSON.parse(new TextDecoder().decode(backupEntry));
+      const audioFiles = Array.isArray(data.audioFiles) ? data.audioFiles : [];
+      let restoredAudioCount = 0;
+      for (const audio of audioFiles) {
+        if (!audio || !audio.id || !audio.path) continue;
+        const bytes = entries.get(audio.path);
+        if (!bytes) continue;
+        await saveAudioBlob(audio.id, new Blob([bytes], { type: audio.type || 'audio/mpeg' }));
+        restoredAudioCount += 1;
+      }
+      const result = await importBackup(Object.assign({}, data, { audioFiles: [] }));
+      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频。`;
+      renderArticleList();
+      renderWordBookPage();
+      showReport();
+      showSection('list');
+    } catch (error) {
+      elements.backupStatus.textContent = `完整导入失败：${error.message}`;
     }
   }
 
@@ -982,6 +1150,8 @@ function getAudioUrl(audioId) {
         const existingId = targetArticle.id;
         Object.assign(targetArticle, article);
         targetArticle.id = existingId;
+        existingById.set(targetArticle.id, targetArticle);
+        existingByKey.set(getArticleImportKey(targetArticle), targetArticle);
         overwrittenCount += 1;
       } else {
         if (existingById.has(article.id)) {
@@ -1025,8 +1195,24 @@ function getAudioUrl(audioId) {
     return { importedCount, overwrittenCount, wordImportedCount, wordOverwrittenCount };
   }
 
+  function sanitizeZipPath(value) {
+    return safeString(value).replace(/[^a-zA-Z0-9._-]/g, '_') || `audio-${Date.now()}`;
+  }
+
+  function getAudioExtension(type) {
+    const value = safeString(type).toLowerCase();
+    if (value.includes('wav')) return '.wav';
+    if (value.includes('ogg')) return '.ogg';
+    if (value.includes('webm')) return '.webm';
+    if (value.includes('mp4') || value.includes('m4a')) return '.m4a';
+    return '.mp3';
+  }
+
   function downloadJson(value, filename) {
-    const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+    downloadBlob(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }), filename);
+  }
+
+  function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -1035,6 +1221,156 @@ function getAudioUrl(audioId) {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  const crcTable = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) {
+        c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      }
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (let i = 0; i < bytes.length; i += 1) {
+      crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function writeUint16(target, offset, value) {
+    target[offset] = value & 0xff;
+    target[offset + 1] = (value >>> 8) & 0xff;
+  }
+
+  function writeUint32(target, offset, value) {
+    target[offset] = value & 0xff;
+    target[offset + 1] = (value >>> 8) & 0xff;
+    target[offset + 2] = (value >>> 16) & 0xff;
+    target[offset + 3] = (value >>> 24) & 0xff;
+  }
+
+  function readUint16(bytes, offset) {
+    return bytes[offset] | (bytes[offset + 1] << 8);
+  }
+
+  function readUint32(bytes, offset) {
+    return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+  }
+
+  function getZipDateTime(date = new Date()) {
+    const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+    const zipDate = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+    return { time, date: zipDate };
+  }
+
+  function concatBytes(parts) {
+    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    parts.forEach(part => {
+      out.set(part, offset);
+      offset += part.length;
+    });
+    return out;
+  }
+
+  function createZipBlob(files) {
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    const now = getZipDateTime();
+    let offset = 0;
+
+    files.forEach(file => {
+      const nameBytes = encoder.encode(file.name);
+      const data = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
+      const crc = crc32(data);
+      const localHeader = new Uint8Array(30 + nameBytes.length);
+      writeUint32(localHeader, 0, 0x04034b50);
+      writeUint16(localHeader, 4, 20);
+      writeUint16(localHeader, 6, 0x0800);
+      writeUint16(localHeader, 8, 0);
+      writeUint16(localHeader, 10, now.time);
+      writeUint16(localHeader, 12, now.date);
+      writeUint32(localHeader, 14, crc);
+      writeUint32(localHeader, 18, data.length);
+      writeUint32(localHeader, 22, data.length);
+      writeUint16(localHeader, 26, nameBytes.length);
+      writeUint16(localHeader, 28, 0);
+      localHeader.set(nameBytes, 30);
+      localParts.push(localHeader, data);
+
+      const centralHeader = new Uint8Array(46 + nameBytes.length);
+      writeUint32(centralHeader, 0, 0x02014b50);
+      writeUint16(centralHeader, 4, 20);
+      writeUint16(centralHeader, 6, 20);
+      writeUint16(centralHeader, 8, 0x0800);
+      writeUint16(centralHeader, 10, 0);
+      writeUint16(centralHeader, 12, now.time);
+      writeUint16(centralHeader, 14, now.date);
+      writeUint32(centralHeader, 16, crc);
+      writeUint32(centralHeader, 20, data.length);
+      writeUint32(centralHeader, 24, data.length);
+      writeUint16(centralHeader, 28, nameBytes.length);
+      writeUint16(centralHeader, 30, 0);
+      writeUint16(centralHeader, 32, 0);
+      writeUint16(centralHeader, 34, 0);
+      writeUint16(centralHeader, 36, 0);
+      writeUint32(centralHeader, 38, 0);
+      writeUint32(centralHeader, 42, offset);
+      centralHeader.set(nameBytes, 46);
+      centralParts.push(centralHeader);
+
+      offset += localHeader.length + data.length;
+    });
+
+    const centralDirectory = concatBytes(centralParts);
+    const endRecord = new Uint8Array(22);
+    writeUint32(endRecord, 0, 0x06054b50);
+    writeUint16(endRecord, 8, files.length);
+    writeUint16(endRecord, 10, files.length);
+    writeUint32(endRecord, 12, centralDirectory.length);
+    writeUint32(endRecord, 16, offset);
+    writeUint16(endRecord, 20, 0);
+
+    return new Blob([concatBytes([...localParts, centralDirectory, endRecord])], { type: 'application/zip' });
+  }
+
+  function parseZipEntries(bytes) {
+    const decoder = new TextDecoder();
+    const entries = new Map();
+    let offset = 0;
+    while (offset + 30 <= bytes.length) {
+      const signature = readUint32(bytes, offset);
+      if (signature !== 0x04034b50) break;
+      const flags = readUint16(bytes, offset + 6);
+      const method = readUint16(bytes, offset + 8);
+      if (method !== 0) {
+        throw new Error('当前只支持应用生成的未压缩 ZIP 备份。');
+      }
+      if (flags & 0x0008) {
+        throw new Error('当前 ZIP 使用了数据描述符，无法导入。请使用应用导出的完整备份。');
+      }
+      const compressedSize = readUint32(bytes, offset + 18);
+      const fileNameLength = readUint16(bytes, offset + 26);
+      const extraLength = readUint16(bytes, offset + 28);
+      const nameStart = offset + 30;
+      const dataStart = nameStart + fileNameLength + extraLength;
+      const dataEnd = dataStart + compressedSize;
+      if (dataEnd > bytes.length) {
+        throw new Error('ZIP 文件不完整。');
+      }
+      const name = decoder.decode(bytes.slice(nameStart, nameStart + fileNameLength));
+      entries.set(name, bytes.slice(dataStart, dataEnd));
+      offset = dataEnd;
+    }
+    return entries;
   }
 
   function blobToBase64(blob) {

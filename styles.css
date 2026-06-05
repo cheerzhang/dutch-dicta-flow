@@ -1606,6 +1606,36 @@ body.modal-open {
   min-height: 1.4em;
 }
 
+.backup-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.backup-mode-card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+
+.backup-mode-header h3 {
+  margin: 0 0 4px;
+  color: var(--text);
+}
+
+.backup-mode-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
 .backup-drop-zone {
   position: relative;
   display: grid;
@@ -1634,6 +1664,18 @@ body.modal-open {
     #ffffff;
   box-shadow: 0 16px 34px rgba(37, 99, 235, 0.12), inset 0 0 0 1px rgba(37, 99, 235, 0.12);
   transform: translateY(-1px);
+}
+
+.backup-drop-zone-zip {
+  border-color: #a7f3d0;
+  background:
+    linear-gradient(180deg, rgba(22, 163, 74, 0.08), rgba(22, 163, 74, 0.02)),
+    #ffffff;
+}
+
+.backup-drop-zone-zip .backup-drop-icon {
+  background: var(--success);
+  box-shadow: 0 12px 24px rgba(22, 163, 74, 0.2);
 }
 
 .backup-file-input {
@@ -1731,6 +1773,7 @@ body.modal-open {
   }
 
   .page-nav,
+  .backup-mode-grid,
   .report-grid,
   .report-summary-grid,
   .report-streak-grid,
