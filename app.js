@@ -2749,45 +2749,96 @@ function renderArticleList() {
   }
   elements.emptyList.classList.add('hidden');
 
-  articles.forEach(article => {
+  const listStats = articles.map(article => ({ article, stats: getArticleListStats(article) }));
+  const totalSentences = listStats.reduce((sum, item) => sum + item.stats.sentenceCount, 0);
+  const totalTodayMs = listStats.reduce((sum, item) => sum + item.stats.todayMs, 0);
+  const avgMastery = listStats.length
+    ? Math.round(listStats.reduce((sum, item) => sum + item.stats.mastery, 0) / listStats.length)
+    : 0;
+
+  const summary = document.createElement('div');
+  summary.className = 'article-list-hero';
+  summary.innerHTML = `
+    <div>
+      <div class="article-list-kicker">Blue Study Library</div>
+      <h3>今日文章库</h3>
+      <p>把听写文章、熟练度和复习节奏集中在一个更清爽的蓝色工作台里。</p>
+    </div>
+    <div class="article-list-metrics">
+      <div><strong>${articles.length}</strong><span>文章</span></div>
+      <div><strong>${totalSentences}</strong><span>句子</span></div>
+      <div><strong>${avgMastery}%</strong><span>平均熟练度</span></div>
+      <div><strong>${formatDuration(totalTodayMs)}</strong><span>今日用时</span></div>
+    </div>
+  `;
+  elements.articles.appendChild(summary);
+
+  listStats.forEach(({ article, stats }, index) => {
     const card = document.createElement('div');
-    card.className = 'card article-card';
+    card.className = 'article-card';
+    card.style.setProperty('--mastery', `${Math.max(0, Math.min(100, stats.mastery))}%`);
+    card.style.setProperty('--card-delay', `${Math.min(index * 40, 280)}ms`);
+
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'article-card-main';
+
+    const eyebrow = document.createElement('div');
+    eyebrow.className = 'article-card-eyebrow';
+    eyebrow.textContent = article.source || '来源未知';
+
     const title = document.createElement('h3');
     title.textContent = article.title;
+
     const meta = document.createElement('div');
-    meta.className = 'help-text';
-    const stats = getArticleListStats(article);
-    const tagsText = article.tags && article.tags.length ? ` · 标签：${article.tags.join('，')}` : '';
-    meta.textContent = `${article.source || '来源：未知'}${tagsText}`;
+    meta.className = 'article-card-meta';
+    meta.textContent = `${stats.sentenceCount} 个句子 · ${stats.sessionCount} 轮复习 · 最近平均 ${formatDuration(stats.avgTimeMs)}`;
+
+    const tags = document.createElement('div');
+    tags.className = 'article-card-tags';
+    const tagList = article.tags && article.tags.length ? article.tags : ['未标记'];
+    tagList.slice(0, 4).forEach(tag => {
+      const chip = document.createElement('span');
+      chip.textContent = tag;
+      tags.appendChild(chip);
+    });
 
     const statLine = document.createElement('div');
     statLine.className = 'article-card-stats';
-    statLine.innerHTML = `
-      <span>句子 ${stats.sentenceCount}</span>
-      <span>复习轮次 ${stats.sessionCount} 次</span>
-      <span>今天用时 ${formatDuration(stats.todayMs)}</span>
-      <span>平均用时 ${formatDuration(stats.avgTimeMs)}</span>
-      <span>正确率 ${stats.accuracy}%</span>
-      <span>熟练度 ${stats.mastery}%</span>
-    `;
+    [
+      ['今天', formatDuration(stats.todayMs)],
+      ['正确率', `${stats.accuracy}%`],
+      ['熟练度', `${stats.mastery}%`],
+    ].forEach(([label, value]) => {
+      const item = document.createElement('span');
+      item.innerHTML = `<small>${label}</small><strong>${value}</strong>`;
+      statLine.appendChild(item);
+    });
+
+    titleWrap.appendChild(eyebrow);
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(meta);
+    titleWrap.appendChild(tags);
+    titleWrap.appendChild(statLine);
+
+    const mastery = document.createElement('div');
+    mastery.className = 'article-card-mastery';
+    mastery.innerHTML = `<strong>${stats.mastery}%</strong><span>Mastery</span>`;
 
     const actions = document.createElement('div');
-    actions.style.marginTop = '12px';
-    actions.style.display = 'flex';
-    actions.style.gap = '8px';
+    actions.className = 'article-card-actions';
 
     const editBtn = document.createElement('button');
-    editBtn.className = 'btn btn-secondary';
+    editBtn.className = 'btn btn-secondary btn-small';
     editBtn.textContent = '编辑';
     editBtn.addEventListener('click', () => openArticleDetail(article.id));
 
     const reviewBtn = document.createElement('button');
-    reviewBtn.className = 'btn btn-primary';
+    reviewBtn.className = 'btn btn-primary article-review-button';
     reviewBtn.textContent = '复习';
     reviewBtn.addEventListener('click', () => startReview(article.id));
 
     const playBtn = document.createElement('button');
-    playBtn.className = 'btn btn-primary article-play-button';
+    playBtn.className = 'btn btn-secondary btn-small article-play-button';
     playBtn.textContent = '连读';
     playBtn.dataset.articleId = article.id;
     playBtn.addEventListener('click', () => {
@@ -2808,7 +2859,7 @@ function renderArticleList() {
     });
 
     const loopBtn = document.createElement('button');
-    loopBtn.className = 'btn btn-secondary article-loop-button';
+    loopBtn.className = 'btn btn-secondary btn-small article-loop-button';
     loopBtn.textContent = '循环播放';
     loopBtn.dataset.articleId = article.id;
     loopBtn.addEventListener('click', () => {
@@ -2820,7 +2871,7 @@ function renderArticleList() {
     });
 
     const delBtn = document.createElement('button');
-    delBtn.className = 'btn btn-secondary';
+    delBtn.className = 'btn btn-danger btn-small';
     delBtn.textContent = '删除';
     delBtn.addEventListener('click', async () => {
       if (!confirm(`确定删除文章 “${article.title}” 吗？此操作不能撤销。`)) return;
@@ -2834,9 +2885,8 @@ function renderArticleList() {
     actions.appendChild(loopBtn);
     actions.appendChild(delBtn);
 
-    card.appendChild(title);
-    card.appendChild(meta);
-    card.appendChild(statLine);
+    card.appendChild(titleWrap);
+    card.appendChild(mastery);
     card.appendChild(actions);
     elements.articles.appendChild(card);
   });
