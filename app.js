@@ -564,81 +564,76 @@ function handleArticleSubmit(event) {
   openArticleDetail(article.id);
 }
 
-function tokenizeWords(text) {
-  return String(text)
+function normalizeWordToken(word) {
+  return String(word)
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
+    .replace(/['’‘`´]/g, '')
+    .replace(/[^\p{L}\p{N}]/gu, '');
 }
 
-function getMistypedWords(target, answer) {
-  const targetWords = tokenizeWords(target);
-  const answerWords = tokenizeWords(answer);
-  const wrong = [];
-  const length = Math.max(targetWords.length, answerWords.length);
-  for (let i = 0; i < length; i += 1) {
-    const expected = targetWords[i] || '';
-    const actual = answerWords[i] || '';
-    if (expected && expected !== actual) {
-      wrong.push(expected);
+function tokenizeWordObjects(text) {
+  const matches = String(text).match(/[\p{L}\p{N}]+(?:['’‘`´][\p{L}\p{N}]+)*/gu) || [];
+  return matches
+    .map(raw => ({ raw, normalized: normalizeWordToken(raw) }))
+    .filter(item => item.normalized);
+}
+
+function tokenizeWords(text) {
+  return tokenizeWordObjects(text).map(item => item.normalized);
+}
+
+function alignMistypedWordPairs(target, answer) {
+  const targetWords = tokenizeWordObjects(target);
+  const answerWords = tokenizeWordObjects(answer);
+  const rows = targetWords.length;
+  const cols = answerWords.length;
+  const dp = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(0));
+
+  for (let i = 0; i <= rows; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= cols; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i <= rows; i += 1) {
+    for (let j = 1; j <= cols; j += 1) {
+      const same = targetWords[i - 1].normalized === answerWords[j - 1].normalized;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (same ? 0 : 1)
+      );
     }
   }
-  return Array.from(new Set(wrong));
-}
 
-function getMistypedWordPairs(target, answer) {
-  const targetWords = tokenizeWords(target);
-  const answerWords = tokenizeWords(answer);
   const pairs = [];
-  const answerUsed = new Set();
-
-  for (let i = 0; i < targetWords.length; i++) {
-    const targetWord = targetWords[i];
-    if (!targetWord) continue;
-
-    let matchIdx = -1;
-    let exactMatch = false;
-
-    // 第一步：在周围范围内找完全相同的单词（避免级联错位）
-    for (let j = Math.max(0, i - 1); j < Math.min(answerWords.length, i + 3); j++) {
-      if (!answerUsed.has(j) && answerWords[j] === targetWord) {
-        matchIdx = j;
-        exactMatch = true;
-        break;
+  let i = rows;
+  let j = cols;
+  while (i > 0 || j > 0) {
+    if (
+      i > 0 &&
+      j > 0 &&
+      dp[i][j] === dp[i - 1][j - 1] + (targetWords[i - 1].normalized === answerWords[j - 1].normalized ? 0 : 1)
+    ) {
+      if (targetWords[i - 1].normalized !== answerWords[j - 1].normalized) {
+        pairs.unshift({ expected: targetWords[i - 1].raw, actual: answerWords[j - 1].raw });
       }
-    }
-
-    // 第二步：如果没找到完全相同的，找最相近的单词
-    if (matchIdx === -1) {
-      let bestScore = -1;
-      for (let j = 0; j < answerWords.length; j++) {
-        if (answerUsed.has(j)) continue;
-        const dist = levenshteinDistance(targetWord, answerWords[j]);
-        const posDist = Math.abs(i - j);
-        // 综合考虑编辑距离和位置距离
-        const score = 100 - dist * 10 - posDist * 5;
-        if (score > bestScore && score > 50) {
-          bestScore = score;
-          matchIdx = j;
-        }
-      }
-    }
-
-    // 标记已使用
-    if (matchIdx >= 0) {
-      answerUsed.add(matchIdx);
-      const answerWord = answerWords[matchIdx];
-      if (!exactMatch && targetWord !== answerWord) {
-        pairs.push({ expected: targetWord, actual: answerWord });
-      }
+      i -= 1;
+      j -= 1;
+    } else if (i > 0 && dp[i][j] === dp[i - 1][j] + 1) {
+      pairs.unshift({ expected: targetWords[i - 1].raw, actual: '（缺失）' });
+      i -= 1;
     } else {
-      // 未找到匹配，表示漏写
-      pairs.push({ expected: targetWord, actual: '（缺失）' });
+      j -= 1;
     }
   }
 
   return pairs;
+}
+
+function getMistypedWords(target, answer) {
+  return Array.from(new Set(alignMistypedWordPairs(target, answer).map(pair => pair.expected)));
+}
+
+function getMistypedWordPairs(target, answer) {
+  return alignMistypedWordPairs(target, answer);
 }
 
 function recordWrongWordEntry(word, sentence, article) {
@@ -1768,14 +1763,6 @@ function getArticleReviewSessions(article) {
     : [];
   const reviewTimes = (article.reviewTimes || []).filter(time => typeof time === 'number' && Number.isFinite(time) && time > 0);
 
-  if (reviewTimes.length) {
-    const startIndex = Math.max(0, savedSessions.length - reviewTimes.length);
-    reviewTimes.slice(0, savedSessions.length).forEach((duration, index) => {
-      const session = savedSessions[startIndex + index];
-      if (session) session.duration = duration;
-    });
-  }
-
   if (reviewTimes.length > savedSessions.length) {
     const fallbackTimestamp = getLatestArticleActivityTimestamp(article);
     const missingDurations = reviewTimes.slice(savedSessions.length);
@@ -1973,10 +1960,39 @@ function showReport() {
       .slice()
       .sort((a, b) => (a.masteryScore || 0) - (b.masteryScore || 0) || (b.count || 0) - (a.count || 0))
       .slice(0, 6);
+    const strongestSignal = overall >= 85
+      ? '状态很稳，继续保持节奏'
+      : overall >= 60
+        ? '正在进入稳定区，再推一把'
+        : '先把基础复习节奏跑起来';
+    const nextFocus = weakestSentences[0]
+      ? `下一步优先复习：“${escapeHtml(weakestSentences[0].articleTitle)}”里的薄弱句子。`
+      : activeMistakeWords > 0
+        ? '下一步优先清理仍需复习的错词。'
+        : '当前薄弱项不多，可以开始挑战新文章。';
+    const masteryArc = Math.max(0, Math.min(100, overall));
     const summaryHtml = `
+      <div class="report-hero">
+        <div class="report-hero-main">
+          <div class="report-hero-kicker">今日学习状态</div>
+          <h3>${strongestSignal}</h3>
+          <p>${nextFocus}</p>
+          <div class="report-hero-actions">
+            <span>今天 ${formatDuration(studyTodayMs)}</span>
+            <span>累计 ${formatDuration(totalDurationsMs)}</span>
+            <span>复习 ${reviewedCount} 条记录</span>
+          </div>
+        </div>
+        <div class="report-mastery-orb" style="--mastery:${masteryArc}%">
+          <div>
+            <strong>${overall}%</strong>
+            <span>整体熟练度</span>
+          </div>
+        </div>
+      </div>
       <div class="report-section-title">学习时间</div>
-      <div class="report-summary-grid">
-        <div class="progress-card">
+      <div class="report-summary-grid report-time-grid">
+        <div class="progress-card highlight">
           <div class="progress-card-title">今天</div>
           <div class="progress-card-value">${formatDuration(studyTodayMs)}</div>
         </div>
@@ -2009,6 +2025,7 @@ function showReport() {
       </div>
       <div class="study-chart-card">
         <div class="study-chart-title">最近 30 天学习时间</div>
+        <div class="study-chart-subtitle">越高的柱子，代表那天听写投入越多。</div>
         ${studyChartSvg}
       </div>
       <div class="report-kpi-grid">
@@ -2634,11 +2651,7 @@ function splitTags(value) {
 }
 
 function normalizeText(text) {
-  return text
-    .toLowerCase()
-    .replace(/[，。！？,.!?]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return tokenizeWords(text).join(' ');
 }
 
 function generateId() {
@@ -2703,10 +2716,10 @@ function getArticleListStats(article) {
   }, 0);
   const accuracy = attempts ? Math.round((correctAttempts / attempts) * 100) : 0;
   const sessionDurations = reviewSessions.map(session => toNumber(session.duration, 0)).filter(duration => duration > 0);
-  const avgTimeMs = reviewTimes.length
-    ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length)
-    : sessionDurations.length
+  const avgTimeMs = sessionDurations.length
       ? Math.round(sessionDurations.reduce((a, b) => a + b, 0) / sessionDurations.length)
+    : reviewTimes.length
+      ? Math.round(reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length)
       : 0;
 
   return {
