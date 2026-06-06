@@ -2924,13 +2924,20 @@ function renderSentences(article) {
   elements.sentences.innerHTML = '';
   const container = elements.sentences;
   const tmpl = elements.sentenceTemplate;
-  (article.sentences || []).forEach(s => {
+  (article.sentences || []).forEach((s, index) => {
     const node = tmpl.content ? tmpl.content.cloneNode(true) : tmpl.cloneNode(true);
     const row = node.querySelector ? node.querySelector('.sentence-row') : node.querySelector('.sentence-row');
+    row.dataset.index = String(index + 1).padStart(2, '0');
+    row.style.setProperty('--sentence-mastery', `${Math.max(0, Math.min(100, Math.round(s.masteryScore || 0)))}%`);
     row.querySelector('.sentence-text').textContent = s.text || '';
     row.querySelector('.sentence-translation').textContent = s.translation || '';
     const metaLine = row.querySelector('.sentence-meta-line');
-    metaLine.textContent = `难度：${s.difficulty || '未设置'} · 复习：${s.reviewCount || 0}`;
+    metaLine.innerHTML = `
+      <span>难度 ${escapeHtml(s.difficulty || '未设置')}</span>
+      <span>复习 ${s.reviewCount || 0} 次</span>
+      <span>熟练度 ${Math.round(s.masteryScore || 0)}%</span>
+      <span>${s.audioId ? '有音频' : '无音频'}</span>
+    `;
 
     const playBtn = row.querySelector('.play-sentence-btn');
     if (playBtn) playBtn.addEventListener('click', async () => {
