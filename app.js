@@ -68,6 +68,8 @@ const elements = {
   wordbookEditPanel: document.getElementById('wordbook-edit-panel'),
   wordbookEditForm: document.getElementById('wordbook-edit-form'),
   startIncorrectReview: document.getElementById('start-incorrect-review'),
+  startWeakestReview: document.getElementById('start-weakest-review'),
+  startUnmasteredReview: document.getElementById('start-unmastered-review'),
   wordbookEditWord: document.getElementById('wordbook-edit-word'),
   wordbookEditTranslation: document.getElementById('wordbook-edit-translation'),
   wordbookEditDifficulty: document.getElementById('wordbook-edit-difficulty'),
@@ -172,6 +174,12 @@ function bindEvents() {
   }
   if (elements.startIncorrectReview) {
     elements.startIncorrectReview.addEventListener('click', () => startReview(selectedArticleId, null, true));
+  }
+  if (elements.startWeakestReview) {
+    elements.startWeakestReview.addEventListener('click', () => startReview(selectedArticleId, null, { mode: 'weakest' }));
+  }
+  if (elements.startUnmasteredReview) {
+    elements.startUnmasteredReview.addEventListener('click', () => startReview(selectedArticleId, null, { mode: 'unmastered' }));
   }
   if (elements.playSentence) {
     elements.playSentence.addEventListener('click', playCurrentSentenceAudio);
@@ -1400,16 +1408,57 @@ function getIncorrectSentenceIds(article) {
   }).map(sentence => sentence.id);
 }
 
-function startReview(articleId, focusSentenceId = null, onlyIncorrect = false) {
+function getWeakestSentenceIds(article) {
+  return (article.sentences || [])
+    .filter(sentence => toNumber(sentence.masteryScore, 0) < 100)
+    .sort((a, b) => {
+      const masteryDiff = toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0);
+      if (masteryDiff !== 0) return masteryDiff;
+      return toNumber(a.reviewCount, 0) - toNumber(b.reviewCount, 0);
+    })
+    .slice(0, 5)
+    .map(sentence => sentence.id);
+}
+
+function getUnmasteredSentenceIds(article) {
+  return (article.sentences || [])
+    .filter(sentence => toNumber(sentence.masteryScore, 0) < 100)
+    .map(sentence => sentence.id);
+}
+
+function getReviewModeTitle(mode) {
+  if (mode === 'incorrect') return '错句集复习';
+  if (mode === 'weakest') return '最弱 5 句复习';
+  if (mode === 'unmastered') return '未满分句子复习';
+  return '听写';
+}
+
+function startReview(articleId, focusSentenceId = null, options = {}) {
   const article = findArticle(articleId);
-  if (!article || article.sentences.length === 0) {
+  const sentences = article?.sentences || [];
+  if (!article || sentences.length === 0) {
     alert('请先为文章添加至少一个句子。');
     return;
   }
 
-  const sentenceIds = onlyIncorrect ? getIncorrectSentenceIds(article) : article.sentences.map(s => s.id);
+  const reviewOptions = typeof options === 'boolean'
+    ? { mode: options ? 'incorrect' : 'all' }
+    : (options || {});
+  const mode = reviewOptions.mode || 'all';
+  let sentenceIds = sentences.map(s => s.id);
+  if (mode === 'incorrect') sentenceIds = getIncorrectSentenceIds(article);
+  if (mode === 'weakest') sentenceIds = getWeakestSentenceIds(article);
+  if (mode === 'unmastered') sentenceIds = getUnmasteredSentenceIds(article);
+
   if (!sentenceIds.length) {
-    alert('当前文章没有需要复习的错误句子。');
+    const emptyMessage = mode === 'incorrect'
+      ? '当前文章没有需要复习的错误句子。'
+      : mode === 'unmastered'
+        ? '当前文章所有句子都已经是 100% 熟练度。'
+        : mode === 'weakest'
+          ? '当前文章所有句子都已经是 100% 熟练度。'
+          : '当前文章没有可复习的句子。';
+    alert(emptyMessage);
     return;
   }
 
@@ -1422,7 +1471,9 @@ function startReview(articleId, focusSentenceId = null, onlyIncorrect = false) {
     doneIds: new Set(),
     sessionScores: [],
     startTime: now,
-    onlyIncorrect,
+    mode,
+    onlyIncorrect: mode === 'incorrect',
+    onlyUnmastered: mode === 'unmastered',
     returnPage: 'list',
   };
 
@@ -1467,7 +1518,7 @@ async function renderReviewItem() {
   const sentence = article.sentences.find(s => s.id === currentReview.sentenceIds[currentReview.index]);
   if (!sentence) return;
 
-  const titlePrefix = currentReview.onlyIncorrect ? '错句集复习' : '听写';
+  const titlePrefix = getReviewModeTitle(currentReview.mode);
   elements.reviewTitle.textContent = `${titlePrefix}：${article.title}`;
   elements.reviewSubtitle.textContent = article.source ? `来源：${article.source}` : '';
   elements.quizIndex.textContent = currentReview.index + 1;
@@ -2837,6 +2888,18 @@ function renderArticleList() {
     reviewBtn.textContent = '复习';
     reviewBtn.addEventListener('click', () => startReview(article.id));
 
+    const weakestBtn = document.createElement('button');
+    weakestBtn.className = 'btn btn-secondary btn-small article-smart-review-button';
+    weakestBtn.textContent = '最弱 5 句';
+    weakestBtn.title = '复习当前文章里熟练度最低的最多 5 个未满分句子';
+    weakestBtn.addEventListener('click', () => startReview(article.id, null, { mode: 'weakest' }));
+
+    const unmasteredBtn = document.createElement('button');
+    unmasteredBtn.className = 'btn btn-secondary btn-small article-smart-review-button';
+    unmasteredBtn.textContent = '跳过满分';
+    unmasteredBtn.title = '复习未达到 100% 熟练度的句子';
+    unmasteredBtn.addEventListener('click', () => startReview(article.id, null, { mode: 'unmastered' }));
+
     const playBtn = document.createElement('button');
     playBtn.className = 'btn btn-secondary btn-small article-play-button';
     playBtn.textContent = '连读';
@@ -2879,8 +2942,10 @@ function renderArticleList() {
       renderArticleList();
     });
 
-    actions.appendChild(editBtn);
     actions.appendChild(reviewBtn);
+    actions.appendChild(weakestBtn);
+    actions.appendChild(unmasteredBtn);
+    actions.appendChild(editBtn);
     actions.appendChild(playBtn);
     actions.appendChild(loopBtn);
     actions.appendChild(delBtn);

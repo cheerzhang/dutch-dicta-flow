@@ -582,6 +582,27 @@ button {
   line-height: 1.1;
 }
 
+.smart-review-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0 30px 20px;
+}
+
+.smart-review-actions .btn {
+  min-height: 46px;
+  color: #0b1f53;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
+}
+
+.smart-review-actions .btn:hover {
+  color: #0b1f53;
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
 #review-panel {
   --review-progress: 0%;
   position: relative;
@@ -763,6 +784,16 @@ button {
     radial-gradient(circle at 96% 0%, rgba(56, 189, 248, 0.2), transparent 34%),
     linear-gradient(135deg, #eff6ff, #ffffff);
   box-shadow: 0 12px 30px rgba(30, 64, 175, 0.08);
+}
+
+#article-detail .review-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+#article-detail .review-actions .btn {
+  min-height: 42px;
 }
 
 .audio-info {
@@ -1591,7 +1622,7 @@ button {
 .article-card {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px minmax(138px, auto);
+  grid-template-columns: minmax(0, 1fr) 112px minmax(190px, auto);
   align-items: center;
   gap: 20px;
   min-height: 148px;
@@ -1759,7 +1790,7 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   justify-self: end;
-  min-width: 138px;
+  min-width: 190px;
 }
 
 .article-card-actions .btn {
@@ -1774,6 +1805,18 @@ button {
   min-height: 42px;
   background: linear-gradient(135deg, #1d4ed8, #0ea5e9);
   border-color: transparent;
+}
+
+.article-card .article-smart-review-button {
+  border-color: #bae6fd;
+  color: #075985;
+  background: #e0f2fe;
+  box-shadow: none;
+}
+
+.article-card .article-smart-review-button:hover {
+  border-color: #7dd3fc;
+  background: #bae6fd;
 }
 
 .article-card .article-play-button,
@@ -2337,7 +2380,8 @@ body.modal-open {
   .article-card-actions {
     grid-column: 1 / -1;
     justify-self: stretch;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    min-width: 0;
   }
 
   .article-card-actions .article-review-button {
@@ -2472,6 +2516,12 @@ body.modal-open {
     margin-right: 18px;
   }
 
+  .smart-review-actions {
+    grid-template-columns: 1fr;
+    margin-left: 18px;
+    margin-right: 18px;
+  }
+
   .sentence-panel,
   .sentence-list,
   .review-actions {
@@ -2482,6 +2532,10 @@ body.modal-open {
   .sentence-panel,
   .sentence-list {
     padding: 18px;
+  }
+
+  #article-detail .review-actions {
+    grid-template-columns: 1fr;
   }
 
   .btn,
