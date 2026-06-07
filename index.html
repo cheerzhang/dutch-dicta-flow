@@ -126,28 +126,45 @@
     </section>
 
     <section class="card hidden" id="wordbook-panel">
-      <h2>错题本</h2>
-      <div class="report-grid">
-        <div class="report-metric">
-          <h3>错词数</h3>
-          <div id="wordbook-total-words">0</div>
+      <div class="wordbook-hero">
+        <div class="wordbook-hero-copy">
+          <div class="wordbook-kicker">Word Focus Deck</div>
+          <h2>错题本</h2>
+          <p>集中处理还没掌握的单词：批量复习、列表朗读、补充释义和音频。</p>
         </div>
-        <div class="report-metric">
-          <h3>错句数</h3>
-          <div id="wordbook-total-sentences">0</div>
-        </div>
-        <div class="report-metric">
-          <h3>总熟练度</h3>
-          <div id="wordbook-overall-mastery">0%</div>
-        </div>
-        <div class="report-metric">
-          <h3>待复习</h3>
-          <div id="wordbook-pending-review">0</div>
+        <div class="wordbook-metrics">
+          <div class="report-metric">
+            <h3>错词数</h3>
+            <div id="wordbook-total-words">0</div>
+          </div>
+          <div class="report-metric">
+            <h3>错句数</h3>
+            <div id="wordbook-total-sentences">0</div>
+          </div>
+          <div class="report-metric">
+            <h3>总熟练度</h3>
+            <div id="wordbook-overall-mastery">0%</div>
+          </div>
+          <div class="report-metric">
+            <h3>待复习</h3>
+            <div id="wordbook-pending-review">0</div>
+          </div>
         </div>
       </div>
       <div class="field-row wordbook-review-controls">
         <button id="wordbook-review-all" class="btn btn-primary">批量复习错题本</button>
         <button id="wordbook-review-unmastered" class="btn btn-secondary">只复习未掌握单词</button>
+        <button id="wordbook-read-unmastered" class="btn btn-secondary">列表播放未掌握单词</button>
+      </div>
+      <div id="wordbook-reading-panel" class="wordbook-reading-panel hidden">
+        <div class="wordbook-reading-header">
+          <div>
+            <h3>未掌握单词朗读</h3>
+            <p>每个单词自动朗读 2 遍，当前朗读的单词会高亮。</p>
+          </div>
+          <button id="wordbook-stop-reading" type="button" class="btn btn-small btn-secondary">结束阅读</button>
+        </div>
+        <div id="wordbook-reading-list" class="wordbook-reading-list"></div>
       </div>
       <div class="report-section">
         <div class="report-section-header">
