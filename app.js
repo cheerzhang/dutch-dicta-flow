@@ -1839,11 +1839,10 @@ function getArticleReviewSessions(article) {
     : [];
   const reviewTimes = (article.reviewTimes || []).filter(time => typeof time === 'number' && Number.isFinite(time) && time > 0);
 
-  if (reviewTimes.length > savedSessions.length) {
+  if (!savedSessions.length && reviewTimes.length) {
     const fallbackTimestamp = getLatestArticleActivityTimestamp(article);
-    const missingDurations = reviewTimes.slice(savedSessions.length);
     if (fallbackTimestamp) {
-      savedSessions.push(...missingDurations.map(duration => ({
+      savedSessions.push(...reviewTimes.map(duration => ({
         timestamp: fallbackTimestamp,
         duration,
         articleId: article.id,
@@ -2757,19 +2756,13 @@ function completeReview(options = {}) {
     const article = findArticle(currentReview.articleId);
     if (article) {
       const duration = summary.duration;
-      article.reviewTimes = article.reviewTimes || [];
       article.reviewSessions = article.reviewSessions || [];
-      article.reviewTimes.push(duration);
       article.reviewSessions.push({
         timestamp: new Date().toISOString(),
         duration,
         averageScore: summary.average,
         reviewedCount: currentReview.doneIds.size,
       });
-      // keep last 20 reviews for average calculation
-      if (article.reviewTimes.length > 20) {
-        article.reviewTimes.shift();
-      }
       if (article.reviewSessions.length > 60) {
         article.reviewSessions = article.reviewSessions.slice(-60);
       }
