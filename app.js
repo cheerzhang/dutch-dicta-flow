@@ -1487,6 +1487,7 @@ function startReview(articleId, focusSentenceId = null, options = {}) {
   selectedArticleId = articleId;
   const now = Date.now();
   currentReview = {
+    sessionId: generateId(),
     articleId,
     sentenceIds,
     index: 0,
@@ -1831,6 +1832,7 @@ function getArticleReviewSessions(article) {
   const savedSessions = Array.isArray(article.reviewSessions)
     ? article.reviewSessions
         .map(session => ({
+          sessionId: session.sessionId || '',
           timestamp: session.timestamp,
           duration: toNumber(session.duration, 0),
           articleId: article.id,
@@ -1851,7 +1853,13 @@ function getArticleReviewSessions(article) {
     }
   }
 
-  return savedSessions;
+  const seen = new Set();
+  return savedSessions.filter(session => {
+    const key = session.sessionId || `${session.timestamp}-${session.duration}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function showReport() {
@@ -2752,17 +2760,23 @@ function completeReview(options = {}) {
   }
 
   // Record review time (sentence review only, not word review)
-  if (!currentReview.type && currentReview.startTime) {
+  if (!currentReview.type && currentReview.startTime && !currentReview.sessionRecorded) {
+    currentReview.sessionRecorded = true;
     const article = findArticle(currentReview.articleId);
     if (article) {
       const duration = summary.duration;
       article.reviewSessions = article.reviewSessions || [];
-      article.reviewSessions.push({
-        timestamp: new Date().toISOString(),
-        duration,
-        averageScore: summary.average,
-        reviewedCount: currentReview.doneIds.size,
-      });
+      const sessionId = currentReview.sessionId || `${currentReview.articleId}-${currentReview.startTime}`;
+      const alreadyRecorded = article.reviewSessions.some(session => session && session.sessionId === sessionId);
+      if (!alreadyRecorded) {
+        article.reviewSessions.push({
+          sessionId,
+          timestamp: new Date().toISOString(),
+          duration,
+          averageScore: summary.average,
+          reviewedCount: currentReview.doneIds.size,
+        });
+      }
       if (article.reviewSessions.length > 60) {
         article.reviewSessions = article.reviewSessions.slice(-60);
       }
