@@ -3,8 +3,8 @@ const WORD_BOOK_KEY = 'dutchDictaWordBook';
 const WORD_REVIEW_SESSIONS_KEY = 'dutchDictaWordReviewSessions';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
-const BACKUP_VERSION = 6;
-const REPORT_SCHEMA_VERSION = 4;
+const BACKUP_VERSION = 7;
+const REPORT_SCHEMA_VERSION = 5;
 
 let articles = [];
 let wordBook = [];
@@ -1198,22 +1198,269 @@ function getAudioUrl(audioId) {
       .filter(session => session && (session.articleId || session.articleTitle));
   }
 
-  function getReportDataSnapshot(normalizedArticles, normalizedWordReviewSessions, portableRecitationSessions) {
-    const articleReviewSessionCount = normalizedArticles.reduce((sum, article) => {
-      return sum + normalizeReviewSessions(article.reviewSessions, article.id).length;
-    }, 0);
+  function getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions) {
+    const now = new Date();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    const dateKey = date => getLocalDateKey(date);
+    const isSameDay = (a, b) => (
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+    );
+    const articleReviewSessions = [];
+    const recitationSessions = [];
+    const allSentences = normalizedArticles.flatMap(article => article.sentences || []);
+    const sentenceHistory = [];
+
+    normalizedArticles.forEach(article => {
+      articleReviewSessions.push(...normalizeReviewSessions(article.reviewSessions, article.id).map(session => ({
+        ...session,
+        type: 'dictation',
+        title: article.title,
+        articleId: article.id,
+      })));
+      recitationSessions.push(...normalizeRecitationSessions(article.recitationSessions).map(session => ({
+        ...session,
+        type: 'recitation',
+        title: article.title,
+        articleId: article.id,
+      })));
+      (article.sentences || []).forEach(sentence => {
+        (Array.isArray(sentence.history) ? sentence.history : []).forEach(entry => {
+          sentenceHistory.push(Object.assign({ articleId: article.id }, entry));
+        });
+      });
+    });
+
+    const wordSessions = normalizedWordReviewSessions.map(session => ({
+      ...session,
+      type: 'word',
+      title: '单词复习',
+    }));
+    const timedStudySessions = [...articleReviewSessions, ...recitationSessions, ...wordSessions];
+    const totalDuration = timedStudySessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+    const sessionsLast7 = timedStudySessions.filter(session => {
+      const date = new Date(session.timestamp);
+      return !Number.isNaN(date.getTime()) && (now - date) <= 7 * oneDayMs;
+    });
+    const sessionsLast30 = timedStudySessions.filter(session => {
+      const date = new Date(session.timestamp);
+      return !Number.isNaN(date.getTime()) && (now - date) <= 30 * oneDayMs;
+    });
+    const studyTodayMs = timedStudySessions
+      .filter(session => isSameDay(new Date(session.timestamp), now))
+      .reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+    const study7Ms = sessionsLast7.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+    const study30Ms = sessionsLast30.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+    const qualitySessionsLast7 = sessionsLast7.filter(session => toNumber(session.averageScore, 0) > 0);
+    const qualityLast7 = qualitySessionsLast7.length
+      ? Math.round(qualitySessionsLast7.reduce((sum, session) => sum + toNumber(session.averageScore, 0), 0) / qualitySessionsLast7.length)
+      : 0;
+    const activeDays30 = new Set(sessionsLast30.map(session => dateKey(new Date(session.timestamp)))).size;
+    const activeDays7 = new Set(sessionsLast7.map(session => dateKey(new Date(session.timestamp)))).size;
+    const allDaysSet = new Set(timedStudySessions.map(session => dateKey(new Date(session.timestamp))));
+    let currentStreak = 0;
+    for (let i = 0; ; i += 1) {
+      const date = new Date(now.getTime() - i * oneDayMs);
+      if (allDaysSet.has(dateKey(date))) currentStreak += 1; else break;
+    }
+
+    const totalSentences = allSentences.length;
+    const totalScore = allSentences.reduce((sum, sentence) => sum + toNumber(sentence.masteryScore, 0), 0);
+    const overallMastery = totalSentences ? Math.round(totalScore / totalSentences) : 0;
+    const masteredSentences = allSentences.filter(sentence => toNumber(sentence.masteryScore, 0) >= 90).length;
+    const learningSentences = allSentences.filter(sentence => {
+      const score = toNumber(sentence.masteryScore, 0);
+      return score > 0 && score < 90;
+    }).length;
+    const untouchedSentences = allSentences.filter(sentence => {
+      const hasHistory = Array.isArray(sentence.history) && sentence.history.length > 0;
+      return !hasHistory && toNumber(sentence.reviewCount, 0) === 0 && toNumber(sentence.masteryScore, 0) <= 0;
+    }).length;
+    const pendingSentences = Math.max(0, totalSentences - masteredSentences);
+    const reviewedSentenceCount = Math.max(0, totalSentences - untouchedSentences);
+    const reviewCoverage = totalSentences ? Math.round((reviewedSentenceCount / totalSentences) * 100) : 0;
+    const masteryRate = totalSentences ? Math.round((masteredSentences / totalSentences) * 100) : 0;
+
+    const articleMastery = normalizedArticles
+      .filter(article => (article.sentences || []).length)
+      .map(article => ({
+        articleId: article.id,
+        title: article.title,
+        reviewCount: toNumber(article.reviewCount, 0),
+        sentenceCount: (article.sentences || []).length,
+        mastery: Math.round(toNumber(article.masteryScore, 0)),
+      }))
+      .sort((a, b) => a.mastery - b.mastery || b.reviewCount - a.reviewCount);
+    const masteredArticles = articleMastery.filter(item => item.mastery >= 90).length;
+    const pendingArticles = Math.max(0, articleMastery.length - masteredArticles);
+
+    const recitationArticleStats = normalizedArticles
+      .map(article => {
+        const sessions = normalizeRecitationSessions(article.recitationSessions)
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        if (!sessions.length) return null;
+        const scores = sessions.map(session => Math.round(toNumber(session.averageScore, 0)));
+        return {
+          articleId: article.id,
+          title: article.title,
+          count: sessions.length,
+          averageScore: Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length),
+          latestScore: scores[0] || 0,
+          bestScore: Math.max(...scores),
+          partialCount: sessions.filter(session => session.partial).length,
+          totalDuration: sessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.averageScore - b.averageScore || b.count - a.count);
+    const masteredRecitationArticles = recitationArticleStats.filter(item => item.averageScore >= 90).length;
+    const avgRecitationScore = recitationSessions.length
+      ? Math.round(recitationSessions.reduce((sum, session) => sum + toNumber(session.averageScore, 0), 0) / recitationSessions.length)
+      : 0;
+    const recitationPartialCount = recitationSessions.filter(session => session.partial).length;
+
+    const totalMistakeWords = normalizedWordBook.length;
+    const masteredMistakeWords = normalizedWordBook.filter(item => toNumber(item.masteryScore, 0) >= 90).length;
+    const activeMistakeWords = normalizedWordBook.filter(item => toNumber(item.masteryScore, 0) < 90).length;
+    const avgMistakeWordMastery = totalMistakeWords
+      ? Math.round(normalizedWordBook.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / totalMistakeWords)
+      : 0;
+    const mostReviewedUnmasteredWords = normalizedWordBook
+      .filter(item => toNumber(item.masteryScore, 0) < 100)
+      .sort((a, b) => toNumber(b.reviewCount, 0) - toNumber(a.reviewCount, 0) || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0))
+      .slice(0, 10)
+      .map(item => ({
+        word: item.word,
+        reviewCount: toNumber(item.reviewCount, 0),
+        mistakeCount: toNumber(item.count, 0),
+        masteryScore: Math.round(toNumber(item.masteryScore, 0)),
+      }));
+
+    const dailyStudyLast30 = [];
+    for (let i = 29; i >= 0; i -= 1) {
+      const date = new Date(now.getTime() - i * oneDayMs);
+      const key = dateKey(date);
+      const daySessions = timedStudySessions.filter(session => dateKey(new Date(session.timestamp)) === key);
+      dailyStudyLast30.push({
+        date: key,
+        duration: daySessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0),
+        sessionCount: daySessions.length,
+      });
+    }
+    const dailyQualityLast14 = dailyStudyLast30.slice(-14).map(day => {
+      const daySessions = timedStudySessions.filter(session => {
+        return dateKey(new Date(session.timestamp)) === day.date && toNumber(session.averageScore, 0) > 0;
+      });
+      return {
+        date: day.date,
+        score: daySessions.length
+          ? Math.round(daySessions.reduce((sum, session) => sum + toNumber(session.averageScore, 0), 0) / daySessions.length)
+          : 0,
+        scoredSessionCount: daySessions.length,
+      };
+    });
+
+    const reviewedUnits = Math.max(1, sentenceHistory.length + normalizedWordReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
+    const avgMsPerUnit = Math.min(180000, Math.max(20000, Math.round(totalDuration / reviewedUnits) || 60000));
+    const avgDailyMs7 = Math.round(study7Ms / 7);
+    const avgActiveDayMs7 = activeDays7 ? Math.round(study7Ms / activeDays7) : 0;
+    const recitationNeedsPractice = recitationArticleStats.filter(item => item.averageScore < 90).length;
+    const remainingUnits = pendingSentences + activeMistakeWords + recitationNeedsPractice;
+    const estimatedRemainingMs = remainingUnits * avgMsPerUnit * 2;
+    const estimateBasisMs = avgDailyMs7 || (totalDuration ? Math.round(totalDuration / Math.max(activeDays30, 1)) : 0);
+    const estimatedDays = remainingUnits === 0 ? 0 : estimateBasisMs ? Math.max(1, Math.ceil(estimatedRemainingMs / estimateBasisMs)) : null;
+    const estimatedWeeks = estimatedDays === 0 ? 0 : estimatedDays ? Math.max(1, Math.ceil(estimatedDays / 7)) : null;
+
     return {
       schemaVersion: REPORT_SCHEMA_VERSION,
       generatedAt: new Date().toISOString(),
+      basis: {
+        masteryThreshold: 90,
+        strongQualityThreshold: 85,
+        lowQualityThreshold: 65,
+        planningMultiplier: 2,
+        qualityAverage: 'unweighted-session-average',
+      },
       sources: [
         'articles.reviewSessions',
         'articles.recitationSessions',
         'wordReviewSessions',
       ],
+      inventory: {
+        articles: normalizedArticles.length,
+        sentences: totalSentences,
+        mistakeWords: totalMistakeWords,
+        recitedArticles: recitationArticleStats.length,
+      },
+      mastery: {
+        overall: overallMastery,
+        sentenceMasteryRate: masteryRate,
+        reviewCoverage,
+        masteredSentences,
+        learningSentences,
+        untouchedSentences,
+        pendingSentences,
+        masteredArticles,
+        pendingArticles,
+      },
+      activity: {
+        todayDuration: studyTodayMs,
+        last7Duration: study7Ms,
+        last30Duration: study30Ms,
+        totalDuration,
+        last7Quality: qualityLast7,
+        activeDaysLast30: activeDays30,
+        currentStreak,
+        averageDailyDurationLast7: avgDailyMs7,
+        averageActiveDayDurationLast7: avgActiveDayMs7,
+      },
+      planning: {
+        remainingUnits,
+        pendingSentences,
+        activeMistakeWords,
+        recitationNeedsPractice,
+        estimatedRemainingDuration: estimatedRemainingMs,
+        estimateBasisDurationPerDay: estimateBasisMs,
+        estimatedDays,
+        estimatedWeeks,
+      },
+      recitation: {
+        sessionCount: recitationSessions.length,
+        articleCount: recitationArticleStats.length,
+        averageScore: avgRecitationScore,
+        masteredArticleCount: masteredRecitationArticles,
+        stableRate: recitationArticleStats.length ? Math.round((masteredRecitationArticles / recitationArticleStats.length) * 100) : 0,
+        partialCount: recitationPartialCount,
+      },
+      mistakes: {
+        totalWords: totalMistakeWords,
+        masteredWords: masteredMistakeWords,
+        activeWords: activeMistakeWords,
+        averageMastery: avgMistakeWordMastery,
+      },
+      charts: {
+        dailyStudyLast30,
+        dailyQualityLast14,
+        articleMasteryScatter: articleMastery.map(item => ({
+          articleId: item.articleId,
+          title: item.title,
+          xReviewCount: item.reviewCount,
+          yMastery: item.mastery,
+          sentenceCount: item.sentenceCount,
+        })),
+      },
+      lists: {
+        priorityArticles: articleMastery
+          .filter(item => item.mastery < 90)
+          .slice(0, 10),
+        recitationByArticle: recitationArticleStats,
+        mostReviewedUnmasteredWords,
+      },
       counts: {
         articles: normalizedArticles.length,
-        sentences: normalizedArticles.reduce((sum, article) => sum + (article.sentences || []).length, 0),
-        articleReviewSessions: articleReviewSessionCount,
+        sentences: totalSentences,
+        articleReviewSessions: articleReviewSessions.length,
         recitationSessions: portableRecitationSessions.length,
         wordReviewSessions: normalizedWordReviewSessions.length,
       },
@@ -1222,6 +1469,7 @@ function getAudioUrl(audioId) {
 
   function buildBackupPayload(options = {}) {
     const normalizedArticles = articles.map(normalizeArticleForBackup).filter(article => article.title);
+    const normalizedWordBook = wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word);
     const normalizedWordReviewSessions = normalizeWordReviewSessions(wordReviewSessions);
     const portableRecitationSessions = getPortableRecitationSessions(normalizedArticles);
     return Object.assign({
@@ -1233,13 +1481,14 @@ function getAudioUrl(audioId) {
         'recitationSessions',
         'wordBook',
         'wordReviewSessions',
+        'reportData',
         'audioFiles',
       ],
       articles: normalizedArticles,
-      wordBook: wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word),
+      wordBook: normalizedWordBook,
       wordReviewSessions: normalizedWordReviewSessions,
       recitationSessions: portableRecitationSessions,
-      reportData: getReportDataSnapshot(normalizedArticles, normalizedWordReviewSessions, portableRecitationSessions),
+      reportData: getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions),
       audioFiles: Array.isArray(options.audioFiles) ? options.audioFiles : [],
       exportedAt: new Date().toISOString(),
     }, options.packageType ? { packageType: options.packageType } : {});
@@ -2881,6 +3130,71 @@ function showReport() {
       .filter(item => (item.masteryScore || 0) < 100)
       .sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0) || (a.masteryScore || 0) - (b.masteryScore || 0) || (b.count || 0) - (a.count || 0))
       .slice(0, 6);
+    const masteredSentences = allSentences.filter(sentence => toNumber(sentence.masteryScore, 0) >= 90).length;
+    const learningSentences = allSentences.filter(sentence => {
+      const score = toNumber(sentence.masteryScore, 0);
+      return score > 0 && score < 90;
+    }).length;
+    const untouchedSentences = allSentences.filter(sentence => {
+      const hasHistory = Array.isArray(sentence.history) && sentence.history.length > 0;
+      return !hasHistory && toNumber(sentence.reviewCount, 0) === 0 && toNumber(sentence.masteryScore, 0) <= 0;
+    }).length;
+    const pendingSentences = Math.max(0, totalSentenceCount - masteredSentences);
+    const masteredArticles = articleMasteryStats.filter(item => item.mastery >= 90).length;
+    const pendingArticles = Math.max(0, articleMasteryStats.length - masteredArticles);
+    const reviewedSentenceCount = Math.max(0, totalSentenceCount - untouchedSentences);
+    const reviewCoverage = totalSentenceCount ? Math.round((reviewedSentenceCount / totalSentenceCount) * 100) : 0;
+    const masteryRate = totalSentenceCount ? Math.round((masteredSentences / totalSentenceCount) * 100) : 0;
+    const recitationStableRate = recitationArticleCount ? Math.round((masteredRecitationArticles / recitationArticleCount) * 100) : 0;
+    const sessionsWithScoreLast7 = sessionsLast7.filter(session => toNumber(session.averageScore, 0) > 0);
+    const qualityLast7 = sessionsWithScoreLast7.length
+      ? Math.round(sessionsWithScoreLast7.reduce((sum, session) => sum + toNumber(session.averageScore, 0), 0) / sessionsWithScoreLast7.length)
+      : 0;
+    const activeDays7 = new Set(sessionsLast7.map(session => dateKey(new Date(session.timestamp)))).size;
+    const avgDailyMs7 = Math.round(study7Ms / 7);
+    const avgActiveDayMs7 = activeDays7 ? Math.round(study7Ms / activeDays7) : 0;
+    const reviewedUnits = Math.max(1, reviewedCount + wordReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
+    const avgMsPerUnit = Math.min(180000, Math.max(20000, Math.round(totalDurationsMs / reviewedUnits) || 60000));
+    const recitationNeedsPractice = recitationArticleStats.filter(item => item.averageScore < 90).length;
+    const remainingUnits = pendingSentences + activeMistakeWords + recitationNeedsPractice;
+    const estimatedRemainingMs = remainingUnits * avgMsPerUnit * 2;
+    const estimateBasisMs = avgDailyMs7 || avgPerDayMs;
+    const estimatedDays = remainingUnits === 0
+      ? 0
+      : estimateBasisMs
+        ? Math.max(1, Math.ceil(estimatedRemainingMs / estimateBasisMs))
+        : null;
+    const estimatedWeeks = estimatedDays === 0 ? 0 : estimatedDays ? Math.max(1, Math.ceil(estimatedDays / 7)) : null;
+    const dailyQuality = dailyDurations.slice(-14).map(day => {
+      const daySessions = timedStudySessions.filter(session => {
+        return dateKey(new Date(session.timestamp)) === day.date && toNumber(session.averageScore, 0) > 0;
+      });
+      const score = daySessions.length
+        ? Math.round(daySessions.reduce((sum, session) => sum + toNumber(session.averageScore, 0), 0) / daySessions.length)
+        : 0;
+      return { date: day.date, score };
+    });
+    const dailyQualityChartSvg = dailyQuality.some(day => day.score > 0)
+      ? renderBarChartSvg(dailyQuality.map(day => ({
+          label: `${day.date.split('-')[1]}/${day.date.split('-')[2]}`,
+          value: day.score,
+          valueLabel: day.score ? `${day.score}%` : '',
+          className: day.score >= 85 ? 'quality-strong-bar' : day.score > 0 && day.score < 65 ? 'quality-low-bar' : 'quality-bar',
+        })), {
+          title: '近 14 天复习质量',
+          maxValue: 100,
+          axisFormatter: value => `${value}%`,
+          labelLimit: 5,
+        })
+      : '';
+    const topPriorityArticles = articleMasteryStats
+      .filter(item => item.mastery < 90)
+      .slice(0, 5);
+    const progressSummaryText = estimatedDays === 0
+      ? '当前待掌握量已经清空。'
+      : estimatedDays
+        ? `按近 7 天节奏估算，当前待掌握量约还需要 ${estimatedDays} 天。`
+        : '还没有足够的复习时间数据，先连续复习几天后这里会开始估算。';
     const strongestSignal = overall >= 85
       ? '状态很稳，继续保持节奏'
       : overall >= 60
@@ -2893,207 +3207,239 @@ function showReport() {
         : '当前薄弱项不多，可以开始挑战新文章。';
     const masteryArc = Math.max(0, Math.min(100, overall));
     const summaryHtml = `
-      <div class="report-hero">
-        <div class="report-hero-main">
-          <div class="report-hero-kicker">今日学习状态</div>
-          <h3>${strongestSignal}</h3>
-          <p>${nextFocus}</p>
-          <div class="report-hero-actions">
-            <span>今天 ${formatDuration(studyTodayMs)}</span>
-            <span>累计 ${formatDuration(totalDurationsMs)}</span>
-            <span>复习 ${reviewedCount} 条记录</span>
+      <div class="report-dashboard">
+        <section class="report-hero report-new-hero">
+          <div class="report-hero-main">
+            <div class="report-hero-kicker">学习仪表盘</div>
+            <h3>${strongestSignal}</h3>
+            <p>${progressSummaryText} ${nextFocus}</p>
+            <div class="report-hero-actions">
+              <span>库里 ${articles.length} 篇文章</span>
+              <span>已掌握 ${masteredSentences} / ${totalSentenceCount} 句</span>
+              <span>近 7 天 ${formatDuration(study7Ms)}</span>
+            </div>
           </div>
-        </div>
-        <div class="report-mastery-orb" style="--mastery:${masteryArc}%">
-          <div>
-            <strong>${overall}%</strong>
-            <span>整体熟练度</span>
+          <div class="report-mastery-orb" style="--mastery:${masteryArc}%">
+            <div>
+              <strong>${overall}%</strong>
+              <span>整体熟练度</span>
+            </div>
           </div>
-        </div>
-      </div>
-      <div class="report-section-title">学习时间</div>
-      <div class="report-summary-grid report-time-grid">
-        <div class="progress-card highlight">
-          <div class="progress-card-title">今天</div>
-          <div class="progress-card-value">${formatDuration(studyTodayMs)}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">本周</div>
-          <div class="progress-card-value">${formatDuration(study7Ms)}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">本月</div>
-          <div class="progress-card-value">${formatDuration(study30Ms)}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">日均</div>
-          <div class="progress-card-value">${formatDuration(avgPerDayMs)}</div>
-        </div>
-      </div>
-      <div class="report-summary-grid report-streak-grid">
-        <div class="progress-card">
-          <div class="progress-card-title">活跃天数</div>
-          <div class="progress-card-value">${activeDays}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">当前连续</div>
-          <div class="progress-card-value">${currentStreak}天</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">最长连续</div>
-          <div class="progress-card-value">${longestStreak}天</div>
-        </div>
-      </div>
-      <div class="study-chart-card">
-        <div class="study-chart-title">最近 30 天学习时间</div>
-        <div class="study-chart-subtitle">越高的柱子，代表那天听写投入越多。</div>
-        ${studyChartSvg}
-      </div>
-      <div class="report-kpi-grid">
-        <div class="report-kpi-card">
-          <div class="report-kpi-icon">文</div>
-          <div class="report-kpi-value">${articles.length}</div>
-          <div class="report-kpi-label">文章</div>
-        </div>
-        <div class="report-kpi-card">
-          <div class="report-kpi-icon">句</div>
-          <div class="report-kpi-value">${totalSentenceCount}</div>
-          <div class="report-kpi-label">句子</div>
-        </div>
-        <div class="report-kpi-card">
-          <div class="report-kpi-icon">次</div>
-          <div class="report-kpi-value">${sessionsCount}</div>
-          <div class="report-kpi-label">复习轮次</div>
-        </div>
-        <div class="report-kpi-card">
-          <div class="report-kpi-icon">练</div>
-          <div class="report-kpi-value">${reviewedCount}</div>
-          <div class="report-kpi-label">已复习记录</div>
-        </div>
-        <div class="report-kpi-card">
-          <div class="report-kpi-icon">默</div>
-          <div class="report-kpi-value">${totalRecitationSessions}</div>
-          <div class="report-kpi-label">全文默写次数</div>
-        </div>
-        <div class="report-kpi-card">
-          <div class="report-kpi-icon">%</div>
-          <div class="report-kpi-value">${avgRecitationScore}%</div>
-          <div class="report-kpi-label">默写平均正确率</div>
-        </div>
-        <div class="report-kpi-card">
-          <div class="report-kpi-icon">%</div>
-          <div class="report-kpi-value">${avgArticleMastery}%</div>
-          <div class="report-kpi-label">平均文章熟练度</div>
-        </div>
-        <div class="report-kpi-card">
-          <div class="report-kpi-icon">%</div>
-          <div class="report-kpi-value">${avgSentenceMastery}%</div>
-          <div class="report-kpi-label">平均句子熟练度</div>
-        </div>
-      </div>
-      <div class="report-section-title">全文默写报告</div>
-      <div class="report-summary-grid recitation-report-grid">
-        <div class="progress-card">
-          <div class="progress-card-title">默写文章</div>
-          <div class="progress-card-value">${recitationArticleCount}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">平均正确率</div>
-          <div class="progress-card-value">${avgRecitationScore}%</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">最佳成绩</div>
-          <div class="progress-card-value success-value">${recitationBestScore}%</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">稳定掌握</div>
-          <div class="progress-card-value success-value">${masteredRecitationArticles}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">未完成记录</div>
-          <div class="progress-card-value warning-value">${recitationPartialCount}</div>
-        </div>
-      </div>
-      <div class="report-summary-block recitation-mastery-card">
-        <div class="report-2d-header">
-          <h4>默写熟练度</h4>
-          <span>按平均正确率从低到高排序，优先暴露需要回炉的文章</span>
-        </div>
-        ${recitationArticleStats.length ? recitationArticleStats.map(item => `
-          <div class="recitation-mastery-row">
-            <div class="recitation-mastery-main">
-              <div class="report-row-title">${escapeHtml(item.title)}</div>
-              <div class="report-row-value">
-                默写 ${item.count} 次 · 最近 ${item.latestScore}% · 最佳 ${item.bestScore}% · 用时 ${formatDuration(item.totalDuration)}${item.partialCount ? ` · 未完成 ${item.partialCount} 次` : ''}
+        </section>
+
+        <section class="report-section-band">
+          <div class="report-section-heading">
+            <h3>我的资料库</h3>
+            <p>先看家底：多少文章、句子、错词和可默写内容。</p>
+          </div>
+          <div class="report-inventory-grid">
+            <div class="report-kpi-card">
+              <div class="report-kpi-icon">文</div>
+              <div class="report-kpi-value">${articles.length}</div>
+              <div class="report-kpi-label">文章</div>
+            </div>
+            <div class="report-kpi-card">
+              <div class="report-kpi-icon">句</div>
+              <div class="report-kpi-value">${totalSentenceCount}</div>
+              <div class="report-kpi-label">句子</div>
+            </div>
+            <div class="report-kpi-card">
+              <div class="report-kpi-icon">词</div>
+              <div class="report-kpi-value">${totalMistakeWords}</div>
+              <div class="report-kpi-label">错题本单词</div>
+            </div>
+            <div class="report-kpi-card">
+              <div class="report-kpi-icon">默</div>
+              <div class="report-kpi-value">${recitationArticleCount}</div>
+              <div class="report-kpi-label">已默写文章</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="report-section-band">
+          <div class="report-section-heading">
+            <h3>掌握程度</h3>
+            <p>看已经拿下多少，也看还卡在哪里。</p>
+          </div>
+          <div class="report-mastery-layout">
+            <div class="report-summary-block report-progress-panel">
+              <div class="report-progress-head">
+                <span>句子掌握进度</span>
+                <strong>${masteryRate}%</strong>
               </div>
-              <div class="recitation-mastery-track" aria-hidden="true">
-                <span style="width:${Math.max(2, Math.min(100, item.averageScore))}%"></span>
+              <div class="report-stacked-bar" aria-hidden="true">
+                <span class="mastered" style="width:${masteryRate}%"></span>
+                <span class="learning" style="width:${totalSentenceCount ? Math.round((learningSentences / totalSentenceCount) * 100) : 0}%"></span>
+              </div>
+              <div class="report-progress-legend">
+                <span><i class="mastered"></i>已掌握 ${masteredSentences}</span>
+                <span><i class="learning"></i>学习中 ${learningSentences}</span>
+                <span><i class="untouched"></i>未开始 ${untouchedSentences}</span>
+              </div>
+              <div class="report-plan-grid">
+                <div>
+                  <strong>${masteredArticles}</strong>
+                  <span>已掌握文章</span>
+                </div>
+                <div>
+                  <strong>${pendingArticles}</strong>
+                  <span>待掌握文章</span>
+                </div>
+                <div>
+                  <strong>${reviewCoverage}%</strong>
+                  <span>复习覆盖率</span>
+                </div>
+                <div>
+                  <strong>${avgMistakeWordMastery}%</strong>
+                  <span>错词熟练度</span>
+                </div>
               </div>
             </div>
-            <span class="report-score-pill ${recitationScoreClass(item.averageScore)}">${item.averageScore}%</span>
-          </div>
-        `).join('') : '<div class="empty-state">还没有全文默写记录。完成或结束一次默写后，这里会显示每篇文章的默写熟练度。</div>'}
-      </div>
-      <div class="report-section-title">错题单词报告</div>
-      <div class="report-summary-grid">
-        <div class="progress-card">
-          <div class="progress-card-title">错词总数</div>
-          <div class="progress-card-value">${totalMistakeWords}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">已掌握</div>
-          <div class="progress-card-value success-value">${masteredMistakeWords}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">仍需复习</div>
-          <div class="progress-card-value warning-value">${activeMistakeWords}</div>
-        </div>
-        <div class="progress-card">
-          <div class="progress-card-title">平均熟练度</div>
-          <div class="progress-card-value">${avgMistakeWordMastery}%</div>
-        </div>
-      </div>
-      <div class="mistake-report-grid">
-        <div class="report-summary-block">
-          <h4>最薄弱的单词</h4>
-          ${weakestWords.length ? weakestWords.map(item => `
-            <div class="report-weak-row">
-              <div>
-                <div class="report-row-title">${escapeHtml(item.word)}</div>
-                <div class="report-row-value">错题 ${item.count || 0} 次 · 复习 ${item.reviewCount || 0} 次</div>
+            <div class="report-summary-block report-2d-card">
+              <div class="report-2d-header">
+                <h4>文章熟练度</h4>
+                <span>横轴复习次数，纵轴熟练度</span>
               </div>
-              <span class="report-score-pill ${(item.masteryScore || 0) < 70 ? 'warning' : ''}">${Math.round(item.masteryScore || 0)}%</span>
+              ${articleMasteryChartSvg || '<div class="empty-state">暂无文章熟练度数据。</div>'}
             </div>
-          `).join('') : '<div class="empty-state">暂无薄弱错词。</div>'}
-        </div>
-        <div class="report-summary-block">
-          <h4>复习最多但未掌握</h4>
-          ${mostReviewedUnmasteredWords.length ? mostReviewedUnmasteredWords.map(item => `
-            <div class="report-weak-row">
-              <div>
-                <div class="report-row-title">${escapeHtml(item.word)}</div>
-                <div class="report-row-value">错题 ${item.count || 0} 次 · 复习 ${item.reviewCount || 0} 次</div>
+          </div>
+        </section>
+
+        <section class="report-section-band">
+          <div class="report-section-heading">
+            <h3>每天复习的量和质量</h3>
+            <p>投入时间看节奏，正确率看质量。</p>
+          </div>
+          <div class="report-summary-grid report-time-grid">
+            <div class="progress-card highlight">
+              <div class="progress-card-title">今天</div>
+              <div class="progress-card-value">${formatDuration(studyTodayMs)}</div>
+            </div>
+            <div class="progress-card">
+              <div class="progress-card-title">近 7 天</div>
+              <div class="progress-card-value">${formatDuration(study7Ms)}</div>
+            </div>
+            <div class="progress-card">
+              <div class="progress-card-title">近 7 天质量</div>
+              <div class="progress-card-value">${qualityLast7}%</div>
+            </div>
+            <div class="progress-card">
+              <div class="progress-card-title">当前连续</div>
+              <div class="progress-card-value">${currentStreak}天</div>
+            </div>
+          </div>
+          <div class="report-focus-grid">
+            <div class="study-chart-card">
+              <div class="study-chart-title">最近 30 天学习时间</div>
+              <div class="study-chart-subtitle">包含听写、全文默写和单词复习。</div>
+              ${studyChartSvg}
+            </div>
+            <div class="report-summary-block report-2d-card">
+              <div class="report-2d-header">
+                <h4>近 14 天复习质量</h4>
+                <span>按每天有分数的复习记录计算</span>
               </div>
-              <span class="report-score-pill ${(item.masteryScore || 0) < 70 ? 'warning' : ''}">${Math.round(item.masteryScore || 0)}%</span>
+              ${dailyQualityChartSvg || '<div class="empty-state">还没有足够的正确率记录。</div>'}
             </div>
-          `).join('') : '<div class="empty-state">暂无反复复习后仍未掌握的单词。</div>'}
-        </div>
-      </div>
-      <div class="report-focus-grid">
-        <div class="report-summary-block report-2d-card">
-          <div class="report-2d-header">
-            <h4>文章熟练度</h4>
-            <span>横轴复习次数，纵轴熟练度</span>
           </div>
-          ${articleMasteryChartSvg || '<div class="empty-state">暂无文章熟练度数据。</div>'}
-        </div>
-        <div class="report-summary-block report-2d-card">
-          <div class="report-2d-header">
-            <h4>今天复习时间分布</h4>
-            <span>文章分别统计，单词合并统计</span>
+        </section>
+
+        <section class="report-section-band">
+          <div class="report-section-heading">
+            <h3>剩余规划</h3>
+            <p>把待掌握内容换算成可执行的复习量。</p>
           </div>
-          ${todayDistributionChartSvg || '<div class="empty-state">今天还没有可统计的复习时间。</div>'}
-        </div>
+          <div class="report-planning-layout">
+            <div class="report-summary-block report-plan-card">
+              <div class="report-plan-main">
+                <span>预计还需要</span>
+                <strong>${estimatedDays === 0 ? '已完成' : estimatedDays ? `${estimatedDays}天` : '待估算'}</strong>
+                <p>${estimatedDays === 0 ? '当前没有待掌握内容，可以安心推进新文章。' : estimatedDays ? `约 ${estimatedWeeks} 周。按近 7 天日均 ${formatDuration(estimateBasisMs)} 估算。` : '开始积累复习时间后会自动估算。'}</p>
+              </div>
+              <div class="report-plan-grid">
+                <div>
+                  <strong>${pendingSentences}</strong>
+                  <span>待掌握句子</span>
+                </div>
+                <div>
+                  <strong>${activeMistakeWords}</strong>
+                  <span>待掌握错词</span>
+                </div>
+                <div>
+                  <strong>${recitationNeedsPractice}</strong>
+                  <span>默写待稳定</span>
+                </div>
+                <div>
+                  <strong>${formatDuration(avgActiveDayMs7 || avgDailyMs7)}</strong>
+                  <span>近期日均</span>
+                </div>
+              </div>
+            </div>
+            <div class="report-summary-block">
+              <div class="report-2d-header">
+                <h4>优先处理</h4>
+                <span>先补最低熟练度</span>
+              </div>
+              ${topPriorityArticles.length ? topPriorityArticles.map(item => `
+                <div class="report-weak-row">
+                  <div>
+                    <div class="report-row-title">${escapeHtml(item.title)}</div>
+                    <div class="report-row-value">${item.sentenceCount} 句 · 复习 ${item.reviews} 次</div>
+                  </div>
+                  <span class="report-score-pill ${item.mastery < 70 ? 'warning' : ''}">${item.mastery}%</span>
+                </div>
+              `).join('') : '<div class="empty-state">文章熟练度都很稳，可以推进新内容。</div>'}
+            </div>
+          </div>
+        </section>
+
+        <section class="report-section-band">
+          <div class="report-section-heading">
+            <h3>专项状态</h3>
+            <p>错题本和全文默写作为辅助视角。</p>
+          </div>
+          <div class="report-special-grid">
+            <div class="report-summary-block">
+              <div class="report-2d-header">
+                <h4>全文默写</h4>
+                <span>${avgRecitationScore}% 平均正确率</span>
+              </div>
+              <div class="report-plan-grid compact">
+                <div><strong>${totalRecitationSessions}</strong><span>默写次数</span></div>
+                <div><strong>${masteredRecitationArticles}</strong><span>稳定掌握</span></div>
+                <div><strong>${recitationStableRate}%</strong><span>稳定率</span></div>
+                <div><strong>${recitationPartialCount}</strong><span>未完成</span></div>
+              </div>
+              ${recitationArticleStats.length ? recitationArticleStats.slice(0, 4).map(item => `
+                <div class="recitation-mastery-row">
+                  <div class="recitation-mastery-main">
+                    <div class="report-row-title">${escapeHtml(item.title)}</div>
+                    <div class="report-row-value">最近 ${item.latestScore}% · 最佳 ${item.bestScore}% · ${item.count} 次</div>
+                    <div class="recitation-mastery-track" aria-hidden="true">
+                      <span style="width:${Math.max(2, Math.min(100, item.averageScore))}%"></span>
+                    </div>
+                  </div>
+                  <span class="report-score-pill ${recitationScoreClass(item.averageScore)}">${item.averageScore}%</span>
+                </div>
+              `).join('') : '<div class="empty-state">还没有全文默写记录。</div>'}
+            </div>
+            <div class="report-summary-block">
+              <div class="report-2d-header">
+                <h4>错题本</h4>
+                <span>${activeMistakeWords} 个仍需复习</span>
+              </div>
+              ${mostReviewedUnmasteredWords.length ? mostReviewedUnmasteredWords.slice(0, 5).map(item => `
+                <div class="report-weak-row">
+                  <div>
+                    <div class="report-row-title">${escapeHtml(item.word)}</div>
+                    <div class="report-row-value">错题 ${item.count || 0} 次 · 复习 ${item.reviewCount || 0} 次</div>
+                  </div>
+                  <span class="report-score-pill ${(item.masteryScore || 0) < 70 ? 'warning' : ''}">${Math.round(item.masteryScore || 0)}%</span>
+                </div>
+              `).join('') : '<div class="empty-state">暂无反复复习后仍未掌握的单词。</div>'}
+            </div>
+          </div>
+        </section>
       </div>
     `;
     elements.reportSummary.innerHTML = summaryHtml;
