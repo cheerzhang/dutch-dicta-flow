@@ -24,8 +24,7 @@
       <nav class="page-nav">
         <button class="btn btn-secondary nav-btn active" data-page="list">文章列表</button>
         <button class="btn btn-secondary nav-btn" data-page="create">创建文章</button>
-        <button class="btn btn-secondary nav-btn" data-page="edit">文章编辑</button>
-        <button class="btn btn-secondary nav-btn" data-page="review">复习页面</button>
+        <button class="btn btn-secondary nav-btn" data-page="recite">全文默写</button>
         <button class="btn btn-secondary nav-btn" data-page="wordbook">错题本</button>
         <button class="btn btn-secondary nav-btn" data-page="report">报告页面</button>
         <button class="btn btn-secondary nav-btn" data-page="backup">数据备份</button>
@@ -125,6 +124,48 @@
       </div>
     </section>
 
+    <section class="card hidden" id="recite-panel">
+      <div class="recite-list-view" id="recite-list-view">
+        <div class="recite-hero">
+          <div>
+            <div class="wordbook-kicker">Full Article Recall</div>
+            <h2>全文默写</h2>
+            <p>只显示熟练度 100% 的文章。看中文提示，按句默写整篇荷兰语文本。</p>
+          </div>
+          <div class="recite-hero-metrics">
+            <div class="report-metric">
+              <h3>可默写</h3>
+              <div id="recite-eligible-count">0</div>
+            </div>
+            <div class="report-metric">
+              <h3>最近平均</h3>
+              <div id="recite-average-score">0%</div>
+            </div>
+          </div>
+        </div>
+        <div id="recite-articles" class="recite-articles"></div>
+        <p id="recite-empty" class="empty-state">还没有熟练度 100% 的文章。先把文章听写练到满分，再来全文默写。</p>
+      </div>
+
+      <div class="recite-workspace hidden" id="recite-workspace">
+        <div class="detail-header recite-workspace-header">
+          <div>
+            <h2 id="recite-title">全文默写</h2>
+            <p id="recite-meta"></p>
+          </div>
+          <div>
+            <div class="recite-timer">本次用时：<strong id="recite-elapsed">0秒</strong></div>
+            <button id="recite-end" type="button" class="btn btn-secondary">结束并记录</button>
+            <button id="recite-back" type="button" class="btn btn-secondary">返回默写列表</button>
+            <button id="recite-submit-all" type="button" class="btn btn-primary">提交全文</button>
+          </div>
+        </div>
+        <div id="recite-prompts" class="recite-prompts"></div>
+        <div id="recite-inputs" class="recite-inputs"></div>
+        <div id="recite-overall-result" class="review-summary hidden"></div>
+      </div>
+    </section>
+
     <section class="card hidden" id="wordbook-panel">
       <div class="wordbook-hero">
         <div class="wordbook-hero-copy">
@@ -217,12 +258,12 @@
     </section>
     <section class="card hidden" id="backup-panel">
       <h2>数据备份与存储说明</h2>
-      <p>文章与句子数据会保存在本地浏览器的 <strong>localStorage</strong> 中，句子音频文件保存在浏览器的 <strong>IndexedDB</strong> 中。刷新、关闭浏览器后数据仍会保留，但如果浏览器缓存被清除或换设备，数据会丢失。</p>
+      <p>文章、句子、复习记录、全文默写记录和报告统计来源会保存在本地浏览器的 <strong>localStorage</strong> 中，句子音频文件保存在浏览器的 <strong>IndexedDB</strong> 中。刷新、关闭浏览器后数据仍会保留，但如果浏览器缓存被清除或换设备，数据会丢失。</p>
       <div class="backup-mode-grid">
         <div class="backup-mode-card">
           <div class="backup-mode-header">
             <h3>快速备份</h3>
-            <p>适合你自己日常备份，导出一个 JSON 文件。</p>
+            <p>适合你自己日常备份，导出一个 JSON 文件，包含文章、错题本、复习与全文默写记录。</p>
           </div>
           <button id="backup-export" class="btn btn-primary">快速导出 JSON</button>
           <div class="field-row">
@@ -238,7 +279,7 @@
         <div class="backup-mode-card">
           <div class="backup-mode-header">
             <h3>完整备份</h3>
-            <p>适合发给别人，导出 ZIP：里面包含 JSON 和独立音频文件。</p>
+            <p>适合发给别人，导出 ZIP：里面包含 JSON、复习与全文默写记录，以及独立音频文件。</p>
           </div>
           <button id="backup-export-zip" class="btn btn-secondary">完整导出 ZIP</button>
           <div class="field-row">

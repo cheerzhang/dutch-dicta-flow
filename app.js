@@ -3,6 +3,8 @@ const WORD_BOOK_KEY = 'dutchDictaWordBook';
 const WORD_REVIEW_SESSIONS_KEY = 'dutchDictaWordReviewSessions';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
+const BACKUP_VERSION = 6;
+const REPORT_SCHEMA_VERSION = 4;
 
 let articles = [];
 let wordBook = [];
@@ -12,6 +14,7 @@ let selectedWordBookId = null;
 let currentReview = null;
 let reviewAudio = new Audio();
 let reviewTimer = null;
+let recitationTimer = null;
 let audioBlobCache = new Map();
 let wordReadingState = {
   active: false,
@@ -57,6 +60,22 @@ const elements = {
   pageNavButtons: document.querySelectorAll('.page-nav .nav-btn'),
   startReview: document.getElementById('start-review'),
   reviewPanel: document.getElementById('review-panel'),
+  recitePanel: document.getElementById('recite-panel'),
+  reciteListView: document.getElementById('recite-list-view'),
+  reciteWorkspace: document.getElementById('recite-workspace'),
+  reciteEligibleCount: document.getElementById('recite-eligible-count'),
+  reciteAverageScore: document.getElementById('recite-average-score'),
+  reciteArticles: document.getElementById('recite-articles'),
+  reciteEmpty: document.getElementById('recite-empty'),
+  reciteTitle: document.getElementById('recite-title'),
+  reciteMeta: document.getElementById('recite-meta'),
+  reciteBack: document.getElementById('recite-back'),
+  reciteEnd: document.getElementById('recite-end'),
+  reciteSubmitAll: document.getElementById('recite-submit-all'),
+  reciteElapsed: document.getElementById('recite-elapsed'),
+  recitePrompts: document.getElementById('recite-prompts'),
+  reciteInputs: document.getElementById('recite-inputs'),
+  reciteOverallResult: document.getElementById('recite-overall-result'),
   reportPanel: document.getElementById('report-panel'),
   reportTotalArticles: document.getElementById('report-total-articles'),
   reportTotalSentences: document.getElementById('report-total-sentences'),
@@ -220,6 +239,25 @@ function bindEvents() {
   }
   if (elements.dictationInput) {
     elements.dictationInput.addEventListener('keydown', handleDictationInputKeydown);
+  }
+  if (elements.reciteArticles) {
+    elements.reciteArticles.addEventListener('click', handleReciteArticleClick);
+  }
+  if (elements.recitePrompts) {
+    elements.recitePrompts.addEventListener('click', handleRecitePromptClick);
+  }
+  if (elements.reciteInputs) {
+    elements.reciteInputs.addEventListener('click', handleReciteInputsClick);
+    elements.reciteInputs.addEventListener('input', handleReciteInputChange);
+  }
+  if (elements.reciteBack) {
+    elements.reciteBack.addEventListener('click', handleReciteBack);
+  }
+  if (elements.reciteEnd) {
+    elements.reciteEnd.addEventListener('click', endRecitationSession);
+  }
+  if (elements.reciteSubmitAll) {
+    elements.reciteSubmitAll.addEventListener('click', submitFullRecitation);
   }
   if (elements.backupExport && typeof exportBackup === 'function') {
     elements.backupExport.addEventListener('click', exportBackup);
@@ -448,10 +486,29 @@ function updateDictationInputLabel(text) {
   if (label) label.textContent = text;
 }
 
+function startRecitationTimer() {
+  stopRecitationTimer();
+  updateRecitationTimerDisplay();
+  recitationTimer = setInterval(updateRecitationTimerDisplay, 1000);
+}
+
+function stopRecitationTimer() {
+  if (recitationTimer) {
+    clearInterval(recitationTimer);
+    recitationTimer = null;
+  }
+}
+
+function updateRecitationTimerDisplay() {
+  if (!elements.reciteElapsed || !currentRecitation || !currentRecitation.startTime) return;
+  elements.reciteElapsed.textContent = formatDuration(Date.now() - currentRecitation.startTime);
+}
+
 function showSection(mode) {
   elements.articleCreator.classList.toggle('hidden', mode !== 'create');
   elements.articleDetail.classList.toggle('hidden', mode !== 'edit');
   elements.reviewPanel.classList.toggle('hidden', mode !== 'review');
+  elements.recitePanel.classList.toggle('hidden', mode !== 'recite');
   elements.wordbookPanel.classList.toggle('hidden', mode !== 'wordbook');
   elements.backupPanel.classList.toggle('hidden', mode !== 'backup');
   elements.reportPanel.classList.toggle('hidden', mode !== 'report');
@@ -463,6 +520,9 @@ function showSection(mode) {
   }
   if (mode === 'wordbook') {
     renderWordBookPage();
+  }
+  if (mode === 'recite') {
+    showReciteList();
   }
   if (mode === 'report') showReport();
 }
@@ -551,6 +611,8 @@ function handlePageNav(event) {
     startReview(selectedArticleId);
   } else if (page === 'wordbook') {
     showSection('wordbook');
+  } else if (page === 'recite') {
+    showSection('recite');
   } else if (page === 'report') {
     showSection('report');
   }
@@ -922,6 +984,36 @@ function getAudioUrl(audioId) {
       });
   }
 
+  function normalizeRecitationSessions(sessions) {
+    if (!Array.isArray(sessions)) return [];
+    const seen = new Set();
+    return sessions
+      .map(session => ({
+        sessionId: safeString(session?.sessionId),
+        timestamp: safeString(session?.timestamp),
+        averageScore: toNumber(session?.averageScore, 0),
+        partial: !!session?.partial,
+        completedCount: toNumber(session?.completedCount, 0),
+        total: toNumber(session?.total, 0),
+        duration: toNumber(session?.duration, 0),
+        results: Array.isArray(session?.results)
+          ? session.results.map(item => ({
+              sentenceId: safeString(item?.sentenceId),
+              answer: safeString(item?.answer),
+              correctText: safeString(item?.correctText),
+              score: toNumber(item?.score, 0),
+            }))
+          : [],
+      }))
+      .filter(session => !Number.isNaN(new Date(session.timestamp).getTime()))
+      .filter(session => {
+        const key = session.sessionId || `${session.timestamp}-${session.averageScore}-${session.completedCount}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
   function normalizeSentenceForBackup(sentence) {
     const source = typeof sentence === 'string' ? { text: sentence } : (sentence || {});
     const now = new Date().toISOString();
@@ -966,6 +1058,7 @@ function getAudioUrl(audioId) {
       reviewCount: toNumber(source.reviewCount, 0),
       reviewTimes: Array.isArray(source.reviewTimes) ? source.reviewTimes.filter(time => typeof time === 'number' && Number.isFinite(time)) : [],
       reviewSessions: normalizeReviewSessions(source.reviewSessions, safeString(source.id)),
+      recitationSessions: normalizeRecitationSessions(source.recitationSessions),
       masteryScore: toNumber(source.masteryScore, 0),
       createdAt: safeString(source.createdAt) || now,
       updatedAt: safeString(source.updatedAt) || now,
@@ -1074,6 +1167,84 @@ function getAudioUrl(audioId) {
     return merged;
   }
 
+  function mergeRecitationSessions(a = [], b = []) {
+    return normalizeRecitationSessions([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]);
+  }
+
+  function getPortableRecitationSessions(normalizedArticles) {
+    return normalizedArticles.flatMap(article => {
+      return normalizeRecitationSessions(article.recitationSessions).map(session => ({
+        ...session,
+        articleId: article.id,
+        articleTitle: article.title,
+        articleSource: article.source,
+      }));
+    });
+  }
+
+  function normalizePortableRecitationSessions(sessions) {
+    if (!Array.isArray(sessions)) return [];
+    return sessions
+      .map(session => {
+        const normalized = normalizeRecitationSessions([session])[0];
+        if (!normalized) return null;
+        return {
+          ...normalized,
+          articleId: safeString(session?.articleId),
+          articleTitle: safeString(session?.articleTitle || session?.title),
+          articleSource: safeString(session?.articleSource || session?.source),
+        };
+      })
+      .filter(session => session && (session.articleId || session.articleTitle));
+  }
+
+  function getReportDataSnapshot(normalizedArticles, normalizedWordReviewSessions, portableRecitationSessions) {
+    const articleReviewSessionCount = normalizedArticles.reduce((sum, article) => {
+      return sum + normalizeReviewSessions(article.reviewSessions, article.id).length;
+    }, 0);
+    return {
+      schemaVersion: REPORT_SCHEMA_VERSION,
+      generatedAt: new Date().toISOString(),
+      sources: [
+        'articles.reviewSessions',
+        'articles.recitationSessions',
+        'wordReviewSessions',
+      ],
+      counts: {
+        articles: normalizedArticles.length,
+        sentences: normalizedArticles.reduce((sum, article) => sum + (article.sentences || []).length, 0),
+        articleReviewSessions: articleReviewSessionCount,
+        recitationSessions: portableRecitationSessions.length,
+        wordReviewSessions: normalizedWordReviewSessions.length,
+      },
+    };
+  }
+
+  function buildBackupPayload(options = {}) {
+    const normalizedArticles = articles.map(normalizeArticleForBackup).filter(article => article.title);
+    const normalizedWordReviewSessions = normalizeWordReviewSessions(wordReviewSessions);
+    const portableRecitationSessions = getPortableRecitationSessions(normalizedArticles);
+    return Object.assign({
+      version: BACKUP_VERSION,
+      reportSchema: REPORT_SCHEMA_VERSION,
+      dataKinds: [
+        'articles',
+        'articleReviewSessions',
+        'recitationSessions',
+        'wordBook',
+        'wordReviewSessions',
+        'audioFiles',
+      ],
+      articles: normalizedArticles,
+      wordBook: wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word),
+      wordReviewSessions: normalizedWordReviewSessions,
+      recitationSessions: portableRecitationSessions,
+      reportData: getReportDataSnapshot(normalizedArticles, normalizedWordReviewSessions, portableRecitationSessions),
+      audioFiles: Array.isArray(options.audioFiles) ? options.audioFiles : [],
+      exportedAt: new Date().toISOString(),
+    }, options.packageType ? { packageType: options.packageType } : {});
+  }
+
   function dedupeWordBookEntries(entries) {
     const byWord = new Map();
     entries.forEach(rawEntry => {
@@ -1096,17 +1267,11 @@ function getAudioUrl(audioId) {
         const data = await blobToBase64(entry.file);
         return { id: entry.id, type: entry.file.type, data };
       }));
-      const payload = {
-        version: 4,
-        reportSchema: 2,
-        articles: articles.map(normalizeArticleForBackup).filter(article => article.title),
-        wordBook: wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word),
-        wordReviewSessions: normalizeWordReviewSessions(wordReviewSessions),
+      const payload = buildBackupPayload({
         audioFiles,
-        exportedAt: new Date().toISOString(),
-      };
+      });
       downloadJson(payload, `dutch-dicta-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
-      elements.backupStatus.textContent = '备份已生成，可保存到本地。';
+      elements.backupStatus.textContent = `备份已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录。`;
     } catch (error) {
       elements.backupStatus.textContent = `备份失败：${error.message}`;
     }
@@ -1125,16 +1290,10 @@ function getAudioUrl(audioId) {
         const path = `audio/${sanitizeZipPath(entry.id)}${getAudioExtension(type)}`;
         return { id: entry.id, type, path, size: entry.file.size || 0 };
       });
-      const payload = {
-        version: 4,
+      const payload = buildBackupPayload({
         packageType: 'zip',
-        reportSchema: 2,
-        articles: articles.map(normalizeArticleForBackup).filter(article => article.title),
-        wordBook: wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word),
-        wordReviewSessions: normalizeWordReviewSessions(wordReviewSessions),
         audioFiles,
-        exportedAt: new Date().toISOString(),
-      };
+      });
       const files = [
         {
           name: 'backup.json',
@@ -1147,7 +1306,7 @@ function getAudioUrl(audioId) {
       }
       const zipBlob = createZipBlob(files);
       downloadBlob(zipBlob, `dutch-dicta-complete-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`);
-      elements.backupStatus.textContent = `完整备份 ZIP 已生成：包含 ${audioFiles.length} 个音频文件。`;
+      elements.backupStatus.textContent = `完整备份 ZIP 已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${audioFiles.length} 个音频文件。`;
     } catch (error) {
       elements.backupStatus.textContent = `完整备份失败：${error.message}`;
     }
@@ -1212,7 +1371,7 @@ function getAudioUrl(audioId) {
       const text = await file.text();
       const data = JSON.parse(text);
       const result = await importBackup(data);
-      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${result.wordSessionImportedCount} 条单词复习记录。`;
+      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词复习记录。`;
       renderArticleList();
       renderWordBookPage();
       showReport();
@@ -1246,7 +1405,7 @@ function getAudioUrl(audioId) {
         restoredAudioCount += 1;
       }
       const result = await importBackup(Object.assign({}, data, { audioFiles: [] }));
-      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频；恢复 ${result.wordSessionImportedCount} 条单词复习记录。`;
+      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词复习记录。`;
       renderArticleList();
       renderWordBookPage();
       showReport();
@@ -1260,6 +1419,9 @@ function getAudioUrl(audioId) {
     if (!data || !Array.isArray(data.articles)) {
         throw new Error('无效的备份文件：找不到 articles 数组。');
       }
+      const recitationSessionCountBefore = articles.reduce((sum, article) => {
+        return sum + normalizeRecitationSessions(article.recitationSessions).length;
+      }, 0);
       const audioFilesArray = Array.isArray(data.audioFiles) ? data.audioFiles : [];
       const importPromises = audioFilesArray.map(async entry => {
         try {
@@ -1291,10 +1453,12 @@ function getAudioUrl(audioId) {
         const existingId = targetArticle.id;
         const mergedReviewSessions = mergeReviewSessions(targetArticle.reviewSessions, article.reviewSessions, existingId);
         const mergedReviewTimes = mergeReviewTimes(targetArticle.reviewTimes, article.reviewTimes);
+        const mergedRecitationSessions = mergeRecitationSessions(targetArticle.recitationSessions, article.recitationSessions);
         Object.assign(targetArticle, article);
         targetArticle.id = existingId;
         targetArticle.reviewSessions = mergedReviewSessions;
         targetArticle.reviewTimes = mergedReviewTimes;
+        targetArticle.recitationSessions = mergedRecitationSessions;
         existingById.set(targetArticle.id, targetArticle);
         existingByKey.set(getArticleImportKey(targetArticle), targetArticle);
         overwrittenCount += 1;
@@ -1308,6 +1472,21 @@ function getAudioUrl(audioId) {
         importedCount += 1;
       }
     }
+
+    const portableRecitationSessions = normalizePortableRecitationSessions([
+      ...(Array.isArray(data.recitationSessions) ? data.recitationSessions : []),
+      ...(Array.isArray(data.reportData?.recitationSessions) ? data.reportData.recitationSessions : []),
+    ]);
+    portableRecitationSessions.forEach(session => {
+      const articleKey = `${safeString(session.articleTitle).trim().toLowerCase()}|${safeString(session.articleSource).trim().toLowerCase()}`;
+      let targetArticle = existingById.get(session.articleId) || existingByKey.get(articleKey);
+      if (!targetArticle && session.articleTitle) {
+        const titleKey = safeString(session.articleTitle).trim().toLowerCase();
+        targetArticle = articles.find(article => safeString(article.title).trim().toLowerCase() === titleKey);
+      }
+      if (!targetArticle) return;
+      targetArticle.recitationSessions = mergeRecitationSessions(targetArticle.recitationSessions, [session]);
+    });
 
     wordBook = dedupeWordBookEntries(wordBook);
     const existingWordsByKey = new Map(wordBook.map(item => [getWordImportKey(item), item]));
@@ -1341,10 +1520,14 @@ function getAudioUrl(audioId) {
       ...(Array.isArray(data.wordReviewSessions) ? data.wordReviewSessions : []),
     ]);
     const wordSessionImportedCount = Math.max(0, wordReviewSessions.length - wordSessionCountBefore);
+    const recitationSessionCountAfter = articles.reduce((sum, article) => {
+      return sum + normalizeRecitationSessions(article.recitationSessions).length;
+    }, 0);
+    const recitationSessionImportedCount = Math.max(0, recitationSessionCountAfter - recitationSessionCountBefore);
     saveWordReviewSessions();
     saveWordBook();
     saveArticles();
-    return { importedCount, overwrittenCount, wordImportedCount, wordOverwrittenCount, wordSessionImportedCount };
+    return { importedCount, overwrittenCount, wordImportedCount, wordOverwrittenCount, wordSessionImportedCount, recitationSessionImportedCount };
   }
 
   function sanitizeZipPath(value) {
@@ -1884,6 +2067,335 @@ function renderWordReviewResult(word, score, userAnswer) {
   elements.reviewSummary.classList.remove('hidden');
 }
 
+let currentRecitation = null;
+
+function isArticleRecitationReady(article) {
+  const sentences = article?.sentences || [];
+  return sentences.length > 0 && (
+    Math.round(toNumber(article.masteryScore, 0)) >= 100 ||
+    sentences.every(sentence => toNumber(sentence.masteryScore, 0) >= 100)
+  );
+}
+
+function getRecitationStats(article) {
+  const sessions = normalizeRecitationSessions(article.recitationSessions);
+  const latest = sessions
+    .slice()
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+  const best = sessions.reduce((max, session) => Math.max(max, toNumber(session.averageScore, 0)), 0);
+  return {
+    count: sessions.length,
+    latestScore: latest ? Math.round(latest.averageScore || 0) : 0,
+    bestScore: Math.round(best),
+    latestAt: latest?.timestamp || '',
+  };
+}
+
+function getRecitationEligibleArticles() {
+  return articles.filter(isArticleRecitationReady);
+}
+
+function showReciteList() {
+  stopRecitationTimer();
+  currentRecitation = null;
+  if (elements.reciteListView) elements.reciteListView.classList.remove('hidden');
+  if (elements.reciteWorkspace) elements.reciteWorkspace.classList.add('hidden');
+  renderReciteArticleList();
+}
+
+function handleReciteBack() {
+  if (currentRecitation && !currentRecitation.completed) {
+    if (!confirm('返回前要结束并记录本次默写吗？')) {
+      return;
+    }
+    saveRecitationSession({ requireAnswer: false, partial: true });
+    return;
+  }
+  showReciteList();
+}
+
+function renderReciteArticleList() {
+  if (!elements.reciteArticles) return;
+  const eligible = getRecitationEligibleArticles();
+  const allScores = eligible.flatMap(article => normalizeRecitationSessions(article.recitationSessions).map(session => toNumber(session.averageScore, 0)));
+  const avgScore = allScores.length
+    ? Math.round(allScores.reduce((sum, score) => sum + score, 0) / allScores.length)
+    : 0;
+
+  if (elements.reciteEligibleCount) elements.reciteEligibleCount.textContent = eligible.length;
+  if (elements.reciteAverageScore) elements.reciteAverageScore.textContent = `${avgScore}%`;
+  elements.reciteArticles.innerHTML = '';
+  if (!eligible.length) {
+    if (elements.reciteEmpty) elements.reciteEmpty.classList.remove('hidden');
+    return;
+  }
+  if (elements.reciteEmpty) elements.reciteEmpty.classList.add('hidden');
+
+  eligible.forEach(article => {
+    const stats = getRecitationStats(article);
+    const card = document.createElement('div');
+    card.className = 'recite-article-card';
+    card.dataset.articleId = article.id;
+    card.innerHTML = `
+      <div class="recite-article-main">
+        <div class="article-card-eyebrow">${escapeHtml(article.source || '来源未知')}</div>
+        <h3>${escapeHtml(article.title)}</h3>
+        <div class="article-card-meta">${(article.sentences || []).length} 个句子 · 默写 ${stats.count} 次 · 最佳 ${stats.bestScore}%</div>
+      </div>
+      <div class="recite-article-score">
+        <strong>${stats.latestScore}%</strong>
+        <span>最近默写</span>
+      </div>
+      <button type="button" class="btn btn-primary recite-start-btn">开始默写</button>
+    `;
+    elements.reciteArticles.appendChild(card);
+  });
+}
+
+function handleReciteArticleClick(event) {
+  const button = event.target.closest('.recite-start-btn');
+  if (!button) return;
+  const card = event.target.closest('.recite-article-card');
+  if (!card) return;
+  startArticleRecitation(card.dataset.articleId);
+}
+
+function startArticleRecitation(articleId) {
+  const article = findArticle(articleId);
+  if (!isArticleRecitationReady(article)) {
+    alert('这篇文章还没有达到 100% 熟练度，暂时不能全文默写。');
+    return;
+  }
+  currentRecitation = {
+    sessionId: generateId(),
+    articleId,
+    startTime: Date.now(),
+    submitted: new Set(),
+    results: new Map(),
+  };
+  startRecitationTimer();
+  if (elements.reciteListView) elements.reciteListView.classList.add('hidden');
+  if (elements.reciteWorkspace) elements.reciteWorkspace.classList.remove('hidden');
+  renderRecitationWorkspace(article);
+}
+
+function renderRecitationWorkspace(article) {
+  if (!article || !elements.recitePrompts || !elements.reciteInputs) return;
+  const sentences = article.sentences || [];
+  const stats = getRecitationStats(article);
+  elements.reciteTitle.textContent = `全文默写：${article.title}`;
+  elements.reciteMeta.textContent = `${sentences.length} 句 · 历史默写 ${stats.count} 次 · 最佳 ${stats.bestScore}%`;
+  if (elements.reciteSubmitAll) elements.reciteSubmitAll.disabled = false;
+  if (elements.reciteEnd) elements.reciteEnd.disabled = false;
+  elements.reciteOverallResult.classList.add('hidden');
+  elements.reciteOverallResult.innerHTML = '';
+
+  elements.recitePrompts.innerHTML = sentences.map((sentence, index) => `
+    <span class="recite-prompt-chip">
+      <strong>${index + 1}</strong>
+      <button type="button" class="recite-audio-btn" data-sentence-id="${escapeHtml(sentence.id)}" aria-label="播放第 ${index + 1} 句荷兰语音频" title="播放荷兰语音频">▶</button>
+      ${escapeHtml(sentence.translation || '（无中文提示）')}
+    </span>
+  `).join('');
+
+  elements.reciteInputs.innerHTML = sentences.map((sentence, index) => `
+    <div class="recite-line" data-sentence-id="${escapeHtml(sentence.id)}">
+      <div class="recite-line-number">${index + 1}</div>
+      <textarea rows="1" placeholder="默写第 ${index + 1} 句荷兰语"></textarea>
+      <button type="button" class="btn btn-small btn-secondary recite-line-submit">提交本句</button>
+      <div class="recite-line-result hidden"></div>
+    </div>
+  `).join('');
+}
+
+function handleReciteInputChange(event) {
+  const textarea = event.target.closest('.recite-line textarea');
+  if (!textarea) return;
+  textarea.style.height = 'auto';
+  textarea.style.height = `${Math.max(44, textarea.scrollHeight)}px`;
+  const line = textarea.closest('.recite-line');
+  const sentenceId = line?.dataset.sentenceId;
+  if (sentenceId && currentRecitation?.results.has(sentenceId)) {
+    currentRecitation.results.delete(sentenceId);
+    currentRecitation.submitted.delete(sentenceId);
+    const resultEl = line.querySelector('.recite-line-result');
+    if (resultEl) {
+      resultEl.className = 'recite-line-result hidden';
+      resultEl.innerHTML = '';
+    }
+  }
+}
+
+function handleRecitePromptClick(event) {
+  const audioButton = event.target.closest('.recite-audio-btn');
+  if (audioButton) {
+    playReciteSentenceAudio(audioButton.dataset.sentenceId);
+  }
+}
+
+function handleReciteInputsClick(event) {
+  const submitButton = event.target.closest('.recite-line-submit');
+  if (submitButton) {
+    const line = submitButton.closest('.recite-line');
+    if (line) submitRecitationSentence(line.dataset.sentenceId);
+  }
+}
+
+async function playReciteSentenceAudio(sentenceId) {
+  if (!currentRecitation) return;
+  const article = findArticle(currentRecitation.articleId);
+  const sentence = (article?.sentences || []).find(item => item.id === sentenceId);
+  if (!sentence) return;
+  if (sentence.audioId) {
+    const audioUrl = await getAudioUrl(sentence.audioId);
+    reviewAudio.src = audioUrl;
+    reviewAudio.play();
+    return;
+  }
+  await speakText(sentence.text);
+}
+
+function scoreRecitationSentence(sentence, answer) {
+  const normalizedTarget = normalizeText(sentence.text);
+  const normalizedAnswer = normalizeText(answer);
+  const score = calculateScore(normalizedTarget, normalizedAnswer);
+  const wrongPairs = getMistypedWordPairs(sentence.text, answer);
+  return { score, wrongPairs };
+}
+
+function findRecitationLine(sentenceId) {
+  if (!elements.reciteInputs) return null;
+  return Array.from(elements.reciteInputs.querySelectorAll('.recite-line'))
+    .find(line => line.dataset.sentenceId === sentenceId) || null;
+}
+
+function submitRecitationSentence(sentenceId) {
+  if (!currentRecitation) return null;
+  const article = findArticle(currentRecitation.articleId);
+  const sentence = (article?.sentences || []).find(item => item.id === sentenceId);
+  const line = findRecitationLine(sentenceId);
+  const textarea = line?.querySelector('textarea');
+  if (!sentence || !line || !textarea) return null;
+  const answer = textarea.value.trim();
+  if (!answer) {
+    line.querySelector('.recite-line-result').className = 'recite-line-result warning';
+    line.querySelector('.recite-line-result').textContent = '请先默写这一句。';
+    return null;
+  }
+  const { score, wrongPairs } = scoreRecitationSentence(sentence, answer);
+  const result = {
+    sentenceId,
+    answer,
+    correctText: sentence.text,
+    score,
+    wrongPairs,
+  };
+  currentRecitation.submitted.add(sentenceId);
+  currentRecitation.results.set(sentenceId, result);
+  renderRecitationLineResult(line, result);
+  return result;
+}
+
+function renderRecitationLineResult(line, result) {
+  const resultEl = line.querySelector('.recite-line-result');
+  const differences = highlightSentenceDifferences(result.correctText, result.answer, result.wrongPairs || []);
+  resultEl.className = `recite-line-result ${result.score >= 90 ? 'success' : 'warning'}`;
+  resultEl.innerHTML = `
+    <div class="recite-score-pill">${result.score}%</div>
+    <div class="recite-result-compare">
+      <div><span>正确</span>${differences.highlightedOriginal}</div>
+      <div><span>默写</span>${differences.highlightedAnswer || escapeHtml(result.answer)}</div>
+    </div>
+  `;
+}
+
+function submitFullRecitation() {
+  saveRecitationSession({ requireAnswer: true, partial: false });
+}
+
+function endRecitationSession() {
+  saveRecitationSession({ requireAnswer: false, partial: true });
+}
+
+function saveRecitationSession(options = {}) {
+  if (!currentRecitation) return;
+  if (currentRecitation.completed) {
+    showReciteList();
+    return;
+  }
+  const article = findArticle(currentRecitation.articleId);
+  if (!article) return;
+  const results = [];
+  let hasAnyAnswer = false;
+  let answeredCount = 0;
+  (article.sentences || []).forEach(sentence => {
+    const line = findRecitationLine(sentence.id);
+    const textarea = line?.querySelector('textarea');
+    const answer = textarea ? textarea.value.trim() : '';
+    if (answer) {
+      hasAnyAnswer = true;
+      answeredCount += 1;
+    }
+    const existing = currentRecitation.results.get(sentence.id);
+    if (existing && existing.answer === answer) {
+      results.push(existing);
+      return;
+    }
+    const { score, wrongPairs } = scoreRecitationSentence(sentence, answer);
+    const result = {
+      sentenceId: sentence.id,
+      answer,
+      correctText: sentence.text,
+      score,
+      wrongPairs,
+    };
+    currentRecitation.results.set(sentence.id, result);
+    if (line) renderRecitationLineResult(line, result);
+    results.push(result);
+  });
+
+  if (options.requireAnswer && !hasAnyAnswer) {
+    elements.reciteOverallResult.className = 'review-summary';
+    elements.reciteOverallResult.innerHTML = '<div class="review-summary-note">请至少默写一句后再提交全文。</div>';
+    return;
+  }
+
+  const average = Math.round(results.reduce((sum, item) => sum + item.score, 0) / results.length);
+  const session = {
+    sessionId: currentRecitation.sessionId,
+    timestamp: new Date().toISOString(),
+    duration: Date.now() - currentRecitation.startTime,
+    averageScore: average,
+    partial: !!options.partial,
+    completedCount: answeredCount,
+    total: (article.sentences || []).length,
+    results: results.map(item => ({
+      sentenceId: item.sentenceId,
+      answer: item.answer,
+      correctText: item.correctText,
+      score: item.score,
+    })),
+  };
+  article.recitationSessions = normalizeRecitationSessions([...(article.recitationSessions || []), session]);
+  article.updatedAt = new Date().toISOString();
+  saveArticles();
+  currentRecitation.completed = true;
+  stopRecitationTimer();
+  if (elements.reciteSubmitAll) elements.reciteSubmitAll.disabled = true;
+  if (elements.reciteEnd) elements.reciteEnd.disabled = true;
+
+  elements.reciteOverallResult.className = 'review-summary';
+  elements.reciteOverallResult.innerHTML = `
+    <div class="review-summary-header">
+      <h3>${options.partial ? '默写已结束' : '全文默写完成'}</h3>
+      <div class="review-summary-score">全文正确率：${average}%</div>
+    </div>
+    <div class="review-summary-body">
+      <div class="review-summary-note">本次已默写 ${answeredCount} / ${(article.sentences || []).length} 句，用时 ${formatDuration(session.duration)}。未填写句子按 0 分计入全文正确率，成绩已记录到全文默写列表。</div>
+    </div>
+  `;
+}
+
 function showNextSentence() {
   if (!currentReview) return;
   
@@ -2033,19 +2545,42 @@ function showReport() {
     const totalArticleReviews = articles.reduce((sum, article) => sum + (article.reviewCount || 0), 0);
     const totalSentenceCount = articles.reduce((sum, article) => sum + ((article.sentences || []).length), 0);
     const timedReviewSessions = [];
+    const timedRecitationSessions = [];
     const legacyReviewDurations = [];
     articles.forEach(article => {
       const sessions = getArticleReviewSessions(article);
       if (sessions.length) {
-        timedReviewSessions.push(...sessions);
+        timedReviewSessions.push(...sessions.map(session => ({
+          ...session,
+          type: 'dictation',
+          title: article.title,
+        })));
       } else {
         legacyReviewDurations.push(...(article.reviewTimes || []).filter(time => typeof time === 'number' && Number.isFinite(time)));
       }
+      timedRecitationSessions.push(...normalizeRecitationSessions(article.recitationSessions).map(session => ({
+        ...session,
+        type: 'recitation',
+        title: article.title,
+        articleId: article.id,
+      })));
     });
+    const timedWordSessions = normalizeWordReviewSessions(wordReviewSessions).map(session => ({
+      ...session,
+      type: 'word',
+      title: '单词复习',
+    }));
+    const timedStudySessions = [...timedReviewSessions, ...timedRecitationSessions, ...timedWordSessions];
     const timedDurationsMs = timedReviewSessions.reduce((sum, session) => sum + session.duration, 0);
+    const recitationDurationsMs = timedRecitationSessions.reduce((sum, session) => sum + session.duration, 0);
+    const wordDurationsMs = timedWordSessions.reduce((sum, session) => sum + session.duration, 0);
     const legacyDurationsMs = legacyReviewDurations.reduce((sum, duration) => sum + duration, 0);
-    const totalDurationsMs = timedDurationsMs + legacyDurationsMs;
-    const totalSessions = timedReviewSessions.length + legacyReviewDurations.length;
+    const totalDurationsMs = timedDurationsMs + recitationDurationsMs + wordDurationsMs + legacyDurationsMs;
+    const totalSessions = timedStudySessions.length + legacyReviewDurations.length;
+    const totalRecitationSessions = timedRecitationSessions.length;
+    const avgRecitationScore = totalRecitationSessions
+      ? Math.round(timedRecitationSessions.reduce((sum, session) => sum + toNumber(session.averageScore, 0), 0) / totalRecitationSessions)
+      : 0;
     // Gather all sentence-level history entries (with timestamps)
     const allHistoryEntries = articles.reduce((out, article) => {
       (article.sentences || []).forEach(s => {
@@ -2065,14 +2600,14 @@ function showReport() {
     }
 
     const oneDayMs = 24 * 60 * 60 * 1000;
-    const sessionsToday = timedReviewSessions.filter(session => isSameDay(new Date(session.timestamp), now));
-    const sessionsLast7 = timedReviewSessions.filter(session => { const t = new Date(session.timestamp); return (now - t) <= 7 * oneDayMs; });
-    const sessionsLast30 = timedReviewSessions.filter(session => { const t = new Date(session.timestamp); return (now - t) <= 30 * oneDayMs; });
+    const sessionsToday = timedStudySessions.filter(session => isSameDay(new Date(session.timestamp), now));
+    const sessionsLast7 = timedStudySessions.filter(session => { const t = new Date(session.timestamp); return (now - t) <= 7 * oneDayMs; });
+    const sessionsLast30 = timedStudySessions.filter(session => { const t = new Date(session.timestamp); return (now - t) <= 30 * oneDayMs; });
     const studyTodayMs = sessionsToday.reduce((sum, session) => sum + session.duration, 0);
     const study7Ms = sessionsLast7.reduce((sum, session) => sum + session.duration, 0);
     const study30Ms = sessionsLast30.reduce((sum, session) => sum + session.duration, 0);
-    const firstStudyDate = timedReviewSessions.length
-      ? timedReviewSessions
+    const firstStudyDate = timedStudySessions.length
+      ? timedStudySessions
           .map(session => new Date(session.timestamp))
           .filter(date => !Number.isNaN(date.getTime()))
           .sort((a, b) => a - b)[0]
@@ -2086,7 +2621,7 @@ function showReport() {
     const activeDays = activeDaysSet.size;
 
     // streaks calculation
-    const allDaysSet = new Set(timedReviewSessions.map(session => dateKey(new Date(session.timestamp))));
+    const allDaysSet = new Set(timedStudySessions.map(session => dateKey(new Date(session.timestamp))));
     // current streak: count backward from today while date exists in allDaysSet
     let currentStreak = 0;
     for (let i = 0; ; i++) {
@@ -2116,7 +2651,7 @@ function showReport() {
     for (let i = 29; i >= 0; i--) {
       const d = new Date(now.getTime() - i * oneDayMs);
       const key = dateKey(d);
-      const ms = timedReviewSessions
+      const ms = timedStudySessions
         .filter(session => dateKey(new Date(session.timestamp)) === key)
         .reduce((sum, session) => sum + session.duration, 0);
       dailyDurations.push({ date: key, ms });
@@ -2175,11 +2710,22 @@ function showReport() {
       }))
       .filter(item => item.ms > 0)
       .sort((a, b) => b.ms - a.ms);
+    const todayRecitationDurations = articles
+      .map(article => ({
+        title: `默写：${article.title}`,
+        ms: normalizeRecitationSessions(article.recitationSessions)
+          .filter(session => isSameDay(new Date(session.timestamp), now))
+          .reduce((sum, session) => sum + session.duration, 0),
+        recite: true,
+      }))
+      .filter(item => item.ms > 0)
+      .sort((a, b) => b.ms - a.ms);
     const wordReviewSessionsToday = normalizeWordReviewSessions(wordReviewSessions)
       .filter(session => isSameDay(new Date(session.timestamp), now));
     const wordTodayMs = wordReviewSessionsToday.reduce((sum, session) => sum + session.duration, 0);
     const todayReviewDistribution = [
       ...todayArticleDurations,
+      ...todayRecitationDurations,
       ...(wordTodayMs > 0 ? [{ title: '单词复习', ms: wordTodayMs, word: true }] : []),
     ].sort((a, b) => b.ms - a.ms);
     const maxTodayDistributionMs = Math.max(...todayReviewDistribution.map(item => item.ms), 1);
@@ -2281,13 +2827,46 @@ function showReport() {
           label: item.title,
           value: Math.max(1, Math.round(item.ms / 1000)),
           valueLabel: formatDuration(item.ms),
-          className: item.word ? 'word-bar' : '',
+          className: item.word ? 'word-bar' : item.recite ? 'recite-bar' : '',
         })), {
           title: '今天复习时间分布',
           maxValue: Math.max(1, Math.round(maxTodayDistributionMs / 1000)),
           axisFormatter: value => formatDuration(value * 1000),
         })
       : '';
+    const recitationArticleStats = articles
+      .map(article => {
+        const sessions = normalizeRecitationSessions(article.recitationSessions)
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        if (!sessions.length) return null;
+
+        const scores = sessions.map(session => Math.round(toNumber(session.averageScore, 0)));
+        const averageScore = Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+        const bestScore = Math.max(...scores);
+        const latestScore = scores[0] || 0;
+        const totalDuration = sessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+
+        return {
+          id: article.id,
+          title: article.title,
+          count: sessions.length,
+          averageScore,
+          bestScore,
+          latestScore,
+          totalDuration,
+          partialCount: sessions.filter(session => session.partial).length,
+          lastReviewed: sessions[0]?.timestamp || '',
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.averageScore - b.averageScore || b.count - a.count || a.title.localeCompare(b.title));
+    const recitationArticleCount = recitationArticleStats.length;
+    const recitationPartialCount = timedRecitationSessions.filter(session => session.partial).length;
+    const masteredRecitationArticles = recitationArticleStats.filter(item => item.averageScore >= 90).length;
+    const recitationBestScore = recitationArticleStats.length
+      ? Math.max(...recitationArticleStats.map(item => item.bestScore))
+      : 0;
+    const recitationScoreClass = score => (score < 70 ? 'warning' : score >= 90 ? 'success' : '');
     const totalMistakeWords = wordBook.length;
     const masteredMistakeWords = wordBook.filter(item => (item.masteryScore || 0) >= 90).length;
     const activeMistakeWords = wordBook.filter(item => (item.masteryScore || 0) < 90).length;
@@ -2392,6 +2971,16 @@ function showReport() {
           <div class="report-kpi-label">已复习记录</div>
         </div>
         <div class="report-kpi-card">
+          <div class="report-kpi-icon">默</div>
+          <div class="report-kpi-value">${totalRecitationSessions}</div>
+          <div class="report-kpi-label">全文默写次数</div>
+        </div>
+        <div class="report-kpi-card">
+          <div class="report-kpi-icon">%</div>
+          <div class="report-kpi-value">${avgRecitationScore}%</div>
+          <div class="report-kpi-label">默写平均正确率</div>
+        </div>
+        <div class="report-kpi-card">
           <div class="report-kpi-icon">%</div>
           <div class="report-kpi-value">${avgArticleMastery}%</div>
           <div class="report-kpi-label">平均文章熟练度</div>
@@ -2401,6 +2990,49 @@ function showReport() {
           <div class="report-kpi-value">${avgSentenceMastery}%</div>
           <div class="report-kpi-label">平均句子熟练度</div>
         </div>
+      </div>
+      <div class="report-section-title">全文默写报告</div>
+      <div class="report-summary-grid recitation-report-grid">
+        <div class="progress-card">
+          <div class="progress-card-title">默写文章</div>
+          <div class="progress-card-value">${recitationArticleCount}</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">平均正确率</div>
+          <div class="progress-card-value">${avgRecitationScore}%</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">最佳成绩</div>
+          <div class="progress-card-value success-value">${recitationBestScore}%</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">稳定掌握</div>
+          <div class="progress-card-value success-value">${masteredRecitationArticles}</div>
+        </div>
+        <div class="progress-card">
+          <div class="progress-card-title">未完成记录</div>
+          <div class="progress-card-value warning-value">${recitationPartialCount}</div>
+        </div>
+      </div>
+      <div class="report-summary-block recitation-mastery-card">
+        <div class="report-2d-header">
+          <h4>默写熟练度</h4>
+          <span>按平均正确率从低到高排序，优先暴露需要回炉的文章</span>
+        </div>
+        ${recitationArticleStats.length ? recitationArticleStats.map(item => `
+          <div class="recitation-mastery-row">
+            <div class="recitation-mastery-main">
+              <div class="report-row-title">${escapeHtml(item.title)}</div>
+              <div class="report-row-value">
+                默写 ${item.count} 次 · 最近 ${item.latestScore}% · 最佳 ${item.bestScore}% · 用时 ${formatDuration(item.totalDuration)}${item.partialCount ? ` · 未完成 ${item.partialCount} 次` : ''}
+              </div>
+              <div class="recitation-mastery-track" aria-hidden="true">
+                <span style="width:${Math.max(2, Math.min(100, item.averageScore))}%"></span>
+              </div>
+            </div>
+            <span class="report-score-pill ${recitationScoreClass(item.averageScore)}">${item.averageScore}%</span>
+          </div>
+        `).join('') : '<div class="empty-state">还没有全文默写记录。完成或结束一次默写后，这里会显示每篇文章的默写熟练度。</div>'}
       </div>
       <div class="report-section-title">错题单词报告</div>
       <div class="report-summary-grid">
