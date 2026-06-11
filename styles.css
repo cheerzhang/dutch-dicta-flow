@@ -676,6 +676,14 @@ button {
   margin-top: 18px;
 }
 
+#review-panel.word-review-mode {
+  max-width: 760px;
+}
+
+#review-panel.word-review-mode .review-card {
+  gap: 12px;
+}
+
 #review-panel .field-row {
   margin-bottom: 0;
 }
@@ -951,6 +959,15 @@ button {
   font-weight: 700;
 }
 
+#review-panel.word-review-mode .sentence-card {
+  padding: 20px 18px;
+}
+
+#review-panel.word-review-mode .sentence-card::before {
+  content: "听词语或查看提示，然后直接输入拼写";
+  margin-bottom: 10px;
+}
+
 #review-panel .sentence-controls {
   justify-content: center;
   align-items: center;
@@ -985,6 +1002,25 @@ button {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 0.96rem;
   line-height: 1.7;
+}
+
+#review-panel.word-review-mode #dictation-input {
+  min-height: 58px;
+  resize: none;
+  font-size: 1.08rem;
+  line-height: 1.35;
+}
+
+#review-panel.word-review-mode #submit-answer {
+  min-height: 48px;
+}
+
+#review-panel.word-review-mode .feedback {
+  margin-top: 6px;
+}
+
+#review-panel.word-review-mode .review-summary {
+  margin-top: 8px;
 }
 
 #review-panel .sentence-actions {
@@ -1434,11 +1470,117 @@ button {
   line-height: 1.25;
 }
 
-.report-weak-grid,
+.report-focus-grid,
 .mistake-report-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
+}
+
+.report-2d-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.report-2d-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.report-2d-header h4 {
+  margin: 0;
+}
+
+.report-2d-header span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.report-2d-chart-svg {
+  display: block;
+  width: 100%;
+  min-height: 250px;
+  border: 1px solid #dbe7f5;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+}
+
+.report-2d-bg {
+  fill: transparent;
+}
+
+.report-2d-grid {
+  stroke: #dbe7f5;
+  stroke-width: 1;
+}
+
+.report-2d-grid.subtle {
+  stroke-dasharray: 4 6;
+  opacity: 0.82;
+}
+
+.report-2d-axis {
+  stroke: #9fb2ca;
+  stroke-width: 1.2;
+}
+
+.report-2d-axis-label,
+.report-2d-x-label,
+.report-2d-axis-title {
+  fill: #64748b;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.report-2d-axis-title {
+  fill: #334155;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.report-2d-value {
+  fill: #111827;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.report-2d-bar {
+  fill: #2563eb;
+  filter: drop-shadow(0 8px 12px rgba(37, 99, 235, 0.18));
+}
+
+.report-2d-bar.word-bar {
+  fill: #16a34a;
+  filter: drop-shadow(0 8px 12px rgba(22, 163, 74, 0.18));
+}
+
+.report-2d-point {
+  fill: #2563eb;
+  stroke: #ffffff;
+  stroke-width: 3;
+  filter: drop-shadow(0 8px 10px rgba(37, 99, 235, 0.22));
+}
+
+.report-2d-point.low {
+  fill: #d97706;
+  filter: drop-shadow(0 8px 10px rgba(217, 119, 6, 0.2));
+}
+
+.report-2d-point.strong {
+  fill: #16a34a;
+  filter: drop-shadow(0 8px 10px rgba(22, 163, 74, 0.2));
+}
+
+.report-2d-point-label {
+  fill: #1f2937;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .report-weak-row {
@@ -2705,7 +2847,7 @@ body.modal-open {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .report-weak-grid,
+  .report-focus-grid,
   .mistake-report-grid {
     grid-template-columns: 1fr;
     gap: 16px;
@@ -2766,7 +2908,7 @@ body.modal-open {
   .report-streak-grid,
   .report-kpi-grid,
   .report-charts,
-  .report-weak-grid,
+  .report-focus-grid,
   .mistake-report-grid,
   .report-word-book,
   .field-row.two-column {

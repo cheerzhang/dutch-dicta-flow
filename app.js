@@ -1,10 +1,12 @@
 const STORAGE_KEY = 'dutchDictaArticles';
 const WORD_BOOK_KEY = 'dutchDictaWordBook';
+const WORD_REVIEW_SESSIONS_KEY = 'dutchDictaWordReviewSessions';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
 
 let articles = [];
 let wordBook = [];
+let wordReviewSessions = [];
 let selectedArticleId = null;
 let selectedWordBookId = null;
 let currentReview = null;
@@ -113,6 +115,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await initDatabase();
   loadArticles();
   loadWordBook();
+  loadWordReviewSessions();
   updateBackupEnvironmentControls();
   try {
     if (typeof showSection === 'function') showSection('list');
@@ -214,6 +217,9 @@ function bindEvents() {
   }
   if (elements.endReview) {
     elements.endReview.addEventListener('click', handleEndReview);
+  }
+  if (elements.dictationInput) {
+    elements.dictationInput.addEventListener('keydown', handleDictationInputKeydown);
   }
   if (elements.backupExport && typeof exportBackup === 'function') {
     elements.backupExport.addEventListener('click', exportBackup);
@@ -412,6 +418,10 @@ function updateReviewProgress(current, total) {
 
 function updateReviewNavigationLabel(current, total) {
   if (!elements.nextSentence) return;
+  if (currentReview && currentReview.type === 'word') {
+    elements.nextSentence.textContent = current >= total ? '查看总结' : '下一词';
+    return;
+  }
   elements.nextSentence.textContent = current >= total ? '完成复习' : '下一句';
 }
 
@@ -431,6 +441,11 @@ function stopReviewTimer() {
 function updateReviewTimerDisplay() {
   if (!elements.reviewElapsed || !currentReview || !currentReview.startTime) return;
   elements.reviewElapsed.textContent = formatDuration(Date.now() - currentReview.startTime);
+}
+
+function updateDictationInputLabel(text) {
+  const label = elements.dictationInput?.closest('.field-row')?.querySelector('label');
+  if (label) label.textContent = text;
 }
 
 function showSection(mode) {
@@ -461,6 +476,23 @@ function handleEndReview() {
     return;
   }
   if (currentReview) {
+    if (currentReview.autoAdvanceTimer) {
+      clearTimeout(currentReview.autoAdvanceTimer);
+      currentReview.autoAdvanceTimer = null;
+    }
+    if (currentReview.type === 'word') {
+      if (currentReview.doneIds && currentReview.doneIds.size > 0) {
+        completeReview({ manual: true });
+        return;
+      }
+      if (!confirm('当前错词复习还没有提交任何内容，确定要结束并回到错题本吗？')) {
+        return;
+      }
+      stopReviewTimer();
+      currentReview = null;
+      showSection('wordbook');
+      return;
+    }
     if (currentReview.doneIds && currentReview.doneIds.size > 0) {
       completeReview({ manual: true });
       return;
@@ -476,6 +508,17 @@ function handleEndReview() {
     return;
   }
   showSection('list');
+}
+
+function handleDictationInputKeydown(event) {
+  if (!currentReview || currentReview.completed || currentReview.type !== 'word') return;
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  if (!elements.submitAnswer.disabled) {
+    handleSubmitAnswer();
+  } else if (!elements.nextSentence.disabled) {
+    showNextSentence();
+  }
 }
 
 function setActiveNav(mode) {
@@ -554,6 +597,40 @@ function loadWordBook() {
 
 function saveWordBook() {
   localStorage.setItem(WORD_BOOK_KEY, JSON.stringify(wordBook));
+}
+
+function loadWordReviewSessions() {
+  const raw = localStorage.getItem(WORD_REVIEW_SESSIONS_KEY);
+  try {
+    wordReviewSessions = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    wordReviewSessions = [];
+  }
+  wordReviewSessions = normalizeWordReviewSessions(wordReviewSessions);
+}
+
+function saveWordReviewSessions() {
+  localStorage.setItem(WORD_REVIEW_SESSIONS_KEY, JSON.stringify(normalizeWordReviewSessions(wordReviewSessions).slice(-120)));
+}
+
+function normalizeWordReviewSessions(sessions) {
+  if (!Array.isArray(sessions)) return [];
+  const seen = new Set();
+  return sessions
+    .map(session => ({
+      sessionId: session?.sessionId || '',
+      timestamp: session?.timestamp || '',
+      duration: toNumber(session?.duration, 0),
+      averageScore: toNumber(session?.averageScore, 0),
+      reviewedCount: toNumber(session?.reviewedCount, 0),
+    }))
+    .filter(session => session.duration > 0 && !Number.isNaN(new Date(session.timestamp).getTime()))
+    .filter(session => {
+      const key = session.sessionId || `${session.timestamp}-${session.duration}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function handleArticleSubmit(event) {
@@ -824,6 +901,27 @@ function getAudioUrl(audioId) {
     return value ? splitTags(safeString(value)) : [];
   }
 
+  function normalizeReviewSessions(sessions, articleId = '') {
+    if (!Array.isArray(sessions)) return [];
+    const seen = new Set();
+    return sessions
+      .map(session => ({
+        sessionId: safeString(session?.sessionId),
+        timestamp: safeString(session?.timestamp),
+        duration: toNumber(session?.duration, 0),
+        averageScore: toNumber(session?.averageScore, 0),
+        reviewedCount: toNumber(session?.reviewedCount, 0),
+        articleId: safeString(session?.articleId || articleId),
+      }))
+      .filter(session => session.duration > 0 && !Number.isNaN(new Date(session.timestamp).getTime()))
+      .filter(session => {
+        const key = session.sessionId || `${session.timestamp}-${session.duration}-${session.articleId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
   function normalizeSentenceForBackup(sentence) {
     const source = typeof sentence === 'string' ? { text: sentence } : (sentence || {});
     const now = new Date().toISOString();
@@ -867,7 +965,7 @@ function getAudioUrl(audioId) {
       sentences: dedupeSentencesForBackup(rawSentences.map(normalizeSentenceForBackup).filter(sentence => sentence.text)),
       reviewCount: toNumber(source.reviewCount, 0),
       reviewTimes: Array.isArray(source.reviewTimes) ? source.reviewTimes.filter(time => typeof time === 'number' && Number.isFinite(time)) : [],
-      reviewSessions: Array.isArray(source.reviewSessions) ? source.reviewSessions.filter(session => session && typeof session === 'object') : [],
+      reviewSessions: normalizeReviewSessions(source.reviewSessions, safeString(source.id)),
       masteryScore: toNumber(source.masteryScore, 0),
       createdAt: safeString(source.createdAt) || now,
       updatedAt: safeString(source.updatedAt) || now,
@@ -962,6 +1060,20 @@ function getAudioUrl(audioId) {
     return primary;
   }
 
+  function mergeReviewSessions(a = [], b = [], articleId = '') {
+    return normalizeReviewSessions([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])], articleId);
+  }
+
+  function mergeReviewTimes(a = [], b = []) {
+    const merged = [];
+    [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])].forEach(time => {
+      if (typeof time === 'number' && Number.isFinite(time) && !merged.includes(time)) {
+        merged.push(time);
+      }
+    });
+    return merged;
+  }
+
   function dedupeWordBookEntries(entries) {
     const byWord = new Map();
     entries.forEach(rawEntry => {
@@ -985,9 +1097,11 @@ function getAudioUrl(audioId) {
         return { id: entry.id, type: entry.file.type, data };
       }));
       const payload = {
-        version: 2,
+        version: 4,
+        reportSchema: 2,
         articles: articles.map(normalizeArticleForBackup).filter(article => article.title),
         wordBook: wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word),
+        wordReviewSessions: normalizeWordReviewSessions(wordReviewSessions),
         audioFiles,
         exportedAt: new Date().toISOString(),
       };
@@ -1012,10 +1126,12 @@ function getAudioUrl(audioId) {
         return { id: entry.id, type, path, size: entry.file.size || 0 };
       });
       const payload = {
-        version: 3,
+        version: 4,
         packageType: 'zip',
+        reportSchema: 2,
         articles: articles.map(normalizeArticleForBackup).filter(article => article.title),
         wordBook: wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word),
+        wordReviewSessions: normalizeWordReviewSessions(wordReviewSessions),
         audioFiles,
         exportedAt: new Date().toISOString(),
       };
@@ -1096,7 +1212,7 @@ function getAudioUrl(audioId) {
       const text = await file.text();
       const data = JSON.parse(text);
       const result = await importBackup(data);
-      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词。`;
+      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${result.wordSessionImportedCount} 条单词复习记录。`;
       renderArticleList();
       renderWordBookPage();
       showReport();
@@ -1130,7 +1246,7 @@ function getAudioUrl(audioId) {
         restoredAudioCount += 1;
       }
       const result = await importBackup(Object.assign({}, data, { audioFiles: [] }));
-      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频。`;
+      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频；恢复 ${result.wordSessionImportedCount} 条单词复习记录。`;
       renderArticleList();
       renderWordBookPage();
       showReport();
@@ -1173,8 +1289,12 @@ function getAudioUrl(audioId) {
         const newAudioIds = new Set((article.sentences || []).map(s => s.audioId).filter(Boolean));
         await Promise.all(Array.from(oldAudioIds).filter(id => !newAudioIds.has(id)).map(id => deleteAudio(id)));
         const existingId = targetArticle.id;
+        const mergedReviewSessions = mergeReviewSessions(targetArticle.reviewSessions, article.reviewSessions, existingId);
+        const mergedReviewTimes = mergeReviewTimes(targetArticle.reviewTimes, article.reviewTimes);
         Object.assign(targetArticle, article);
         targetArticle.id = existingId;
+        targetArticle.reviewSessions = mergedReviewSessions;
+        targetArticle.reviewTimes = mergedReviewTimes;
         existingById.set(targetArticle.id, targetArticle);
         existingByKey.set(getArticleImportKey(targetArticle), targetArticle);
         overwrittenCount += 1;
@@ -1215,9 +1335,16 @@ function getAudioUrl(audioId) {
       }
     }
     wordBook.sort((a, b) => b.count - a.count || new Date(b.lastSeen) - new Date(a.lastSeen));
+    const wordSessionCountBefore = normalizeWordReviewSessions(wordReviewSessions).length;
+    wordReviewSessions = normalizeWordReviewSessions([
+      ...wordReviewSessions,
+      ...(Array.isArray(data.wordReviewSessions) ? data.wordReviewSessions : []),
+    ]);
+    const wordSessionImportedCount = Math.max(0, wordReviewSessions.length - wordSessionCountBefore);
+    saveWordReviewSessions();
     saveWordBook();
     saveArticles();
-    return { importedCount, overwrittenCount, wordImportedCount, wordOverwrittenCount };
+    return { importedCount, overwrittenCount, wordImportedCount, wordOverwrittenCount, wordSessionImportedCount };
   }
 
   function sanitizeZipPath(value) {
@@ -1515,11 +1642,16 @@ function startReview(articleId, focusSentenceId = null, options = {}) {
 
 async function renderReviewItem() {
   if (!currentReview) return;
+  if (currentReview.autoAdvanceTimer) {
+    clearTimeout(currentReview.autoAdvanceTimer);
+    currentReview.autoAdvanceTimer = null;
+  }
   if (currentReview.type === 'word') {
     const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
     if (!word) return;
+    if (elements.reviewPanel) elements.reviewPanel.classList.add('word-review-mode');
     elements.reviewTitle.textContent = '错词复习';
-    elements.reviewSubtitle.textContent = `第 ${currentReview.index + 1} 个 / 共 ${currentReview.wordIds.length} 个`;
+    elements.reviewSubtitle.textContent = currentReview.onlyUnmastered ? '只复习未掌握错词' : '批量复习错题本';
     elements.quizIndex.textContent = currentReview.index + 1;
     elements.quizTotal.textContent = currentReview.wordIds.length;
     updateReviewProgress(currentReview.index + 1, currentReview.wordIds.length);
@@ -1527,17 +1659,32 @@ async function renderReviewItem() {
     elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
     elements.sentenceNumber.textContent = `词语 ${currentReview.index + 1}`;
     elements.reviewSentenceDifficultyLabel.textContent = word.difficulty ? `难度：${word.difficulty}` : '难度：未设置';
-    elements.reviewSentenceTagsLabel.textContent = word.translation ? `中文：${word.translation}` : (word.examples.length ? `例句：${word.examples[0]}` : '暂无中文说明');
+    elements.reviewSentenceTagsLabel.textContent = word.translation ? `中文：${word.translation}` : (word.examples?.length ? `例句：${word.examples[0]}` : '暂无中文说明');
     elements.dictationInput.value = '';
-    elements.dictationInput.placeholder = '请拼写这个错词的荷兰语形式';
+    elements.dictationInput.placeholder = '输入这个错词的荷兰语拼写，按 Enter 提交';
+    updateDictationInputLabel('输入错词拼写');
+    elements.submitAnswer.textContent = '提交并继续';
+    elements.nextSentence.classList.add('hidden');
+    elements.showAnswer.classList.toggle('hidden', !word.translation && !(word.examples && word.examples.length));
     showFeedback('', '');
     clearReviewSummary();
-    const audioUrl = await getAudioUrl(word.audioId);
-    reviewAudio.src = audioUrl;
+    if (elements.nextSentence) elements.nextSentence.classList.add('hidden');
+    if (elements.dictationInput) elements.dictationInput.focus();
+    if (word.audioId) {
+      const audioUrl = await getAudioUrl(word.audioId);
+      reviewAudio.src = audioUrl;
+    } else {
+      reviewAudio.removeAttribute('src');
+    }
     reviewAudio.pause();
     return;
   }
 
+  if (elements.reviewPanel) elements.reviewPanel.classList.remove('word-review-mode');
+  if (elements.nextSentence) elements.nextSentence.classList.remove('hidden');
+  if (elements.showAnswer) elements.showAnswer.classList.remove('hidden');
+  if (elements.submitAnswer) elements.submitAnswer.textContent = '提交答案';
+  updateDictationInputLabel('输入你的听写结果');
   const article = findArticle(currentReview.articleId);
   const sentence = article.sentences.find(s => s.id === currentReview.sentenceIds[currentReview.index]);
   if (!sentence) return;
@@ -1566,13 +1713,15 @@ async function playCurrentSentenceAudio() {
   if (!currentReview) return;
   if (currentReview.type === 'word') {
     const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
-    if (!word || !word.audioId) {
-      alert('当前词条尚未上传音频。');
+    if (!word) return;
+    if (word.audioId) {
+      const audioUrl = await getAudioUrl(word.audioId);
+      reviewAudio.src = audioUrl;
+      reviewAudio.play();
       return;
     }
-    const audioUrl = await getAudioUrl(word.audioId);
-    reviewAudio.src = audioUrl;
-    reviewAudio.play();
+    wordReadingState.stopRequested = false;
+    await speakWordText(word.word);
     return;
   }
 
@@ -1613,16 +1762,17 @@ function handleSubmitAnswer() {
   if (currentReview.type === 'word') {
     const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
     if (!word) return;
+    if (currentReview.doneIds.has(word.id)) return;
     const normalizedTarget = normalizeText(word.word);
     const normalizedAnswer = normalizeText(answer);
     const score = calculateScore(normalizedTarget, normalizedAnswer);
     word.reviewCount = (word.reviewCount || 0) + 1;
     word.lastReviewed = new Date().toISOString();
     if (score < 100) {
-      word.count += 1;
+      word.count = (word.count || 0) + 1;
       word.lastSeen = new Date().toISOString();
     }
-    word.masteryScore = Math.min(100, (word.masteryScore || 0) + score * 0.25);
+    word.masteryScore = Math.min(100, Math.max(0, (word.masteryScore || 0) + score * 0.25));
     word.history = word.history || [];
     word.history.unshift({
       timestamp: new Date().toISOString(),
@@ -1644,9 +1794,19 @@ function handleSubmitAnswer() {
     elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
     renderWordReviewResult(word, score, answer);
     elements.submitAnswer.disabled = true;
+    elements.nextSentence.disabled = false;
     if (currentReview.doneIds.size >= currentReview.wordIds.length) {
       currentReview.waitingForManualSummary = true;
       updateReviewNavigationLabel(currentReview.wordIds.length, currentReview.wordIds.length);
+      currentReview.autoAdvanceTimer = setTimeout(() => {
+        currentReview.autoAdvanceTimer = null;
+        completeReview({ manual: true });
+      }, 850);
+    } else {
+      currentReview.autoAdvanceTimer = setTimeout(() => {
+        currentReview.autoAdvanceTimer = null;
+        showNextSentence();
+      }, 700);
     }
     return;
   }
@@ -1829,37 +1989,21 @@ function getLatestArticleActivityTimestamp(article) {
 }
 
 function getArticleReviewSessions(article) {
-  const savedSessions = Array.isArray(article.reviewSessions)
-    ? article.reviewSessions
-        .map(session => ({
-          sessionId: session.sessionId || '',
-          timestamp: session.timestamp,
-          duration: toNumber(session.duration, 0),
-          articleId: article.id,
-        }))
-        .filter(session => session.duration > 0 && !Number.isNaN(new Date(session.timestamp).getTime()))
-    : [];
+  const savedSessions = normalizeReviewSessions(article.reviewSessions, article.id);
   const reviewTimes = (article.reviewTimes || []).filter(time => typeof time === 'number' && Number.isFinite(time) && time > 0);
 
   if (!savedSessions.length && reviewTimes.length) {
     const fallbackTimestamp = getLatestArticleActivityTimestamp(article);
     if (fallbackTimestamp) {
-      savedSessions.push(...reviewTimes.map(duration => ({
+      return normalizeReviewSessions(reviewTimes.map(duration => ({
         timestamp: fallbackTimestamp,
         duration,
         articleId: article.id,
-        legacy: true,
-      })));
+      })), article.id);
     }
   }
 
-  const seen = new Set();
-  return savedSessions.filter(session => {
-    const key = session.sessionId || `${session.timestamp}-${session.duration}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return savedSessions;
 }
 
 function showReport() {
@@ -2008,40 +2152,155 @@ function showReport() {
     const avgArticleMastery = articles.length ? Math.round(articles.reduce((s,a) => s + (a.masteryScore || 0), 0) / articles.length) : 0;
     const allSentences = articles.reduce((s,a) => s.concat(a.sentences || []), []);
     const avgSentenceMastery = allSentences.length ? Math.round(allSentences.reduce((s,si) => s + (si.masteryScore || 0), 0) / allSentences.length) : 0;
-    const articleReviewChart = articles
-      .map(article => ({ title: article.title, count: article.reviewCount || 0 }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 6);
-    const articleMasteryChart = articles
-      .map(article => ({ title: article.title, mastery: Math.round(article.masteryScore || 0) }))
-      .sort((a, b) => b.mastery - a.mastery)
-      .slice(0, 6);
-    const weakestArticles = articles
+    const articleMasteryStats = articles
       .filter(article => (article.sentences || []).length)
       .map(article => ({
+        id: article.id,
         title: article.title,
         reviews: article.reviewCount || 0,
         mastery: Math.round(article.masteryScore || 0),
+        sentenceCount: (article.sentences || []).length,
       }))
-      .sort((a, b) => a.mastery - b.mastery)
-      .slice(0, 4);
+      .sort((a, b) => a.mastery - b.mastery || b.reviews - a.reviews);
     const weakestSentences = wrongSentences
       .slice()
       .sort((a, b) => a.score - b.score || b.wrongAttempts - a.wrongAttempts)
       .slice(0, 6);
+    const todayArticleDurations = articles
+      .map(article => ({
+        title: article.title,
+        ms: getArticleReviewSessions(article)
+          .filter(session => isSameDay(new Date(session.timestamp), now))
+          .reduce((sum, session) => sum + session.duration, 0),
+      }))
+      .filter(item => item.ms > 0)
+      .sort((a, b) => b.ms - a.ms);
+    const wordReviewSessionsToday = normalizeWordReviewSessions(wordReviewSessions)
+      .filter(session => isSameDay(new Date(session.timestamp), now));
+    const wordTodayMs = wordReviewSessionsToday.reduce((sum, session) => sum + session.duration, 0);
+    const todayReviewDistribution = [
+      ...todayArticleDurations,
+      ...(wordTodayMs > 0 ? [{ title: '单词复习', ms: wordTodayMs, word: true }] : []),
+    ].sort((a, b) => b.ms - a.ms);
+    const maxTodayDistributionMs = Math.max(...todayReviewDistribution.map(item => item.ms), 1);
+    const chartGridLines = [0, 25, 50, 75, 100];
+    const chartWidth2d = 720;
+    const chartHeight2d = 260;
+    const chartPadding = { top: 30, right: 24, bottom: 58, left: 48 };
+    const plotWidth = chartWidth2d - chartPadding.left - chartPadding.right;
+    const plotHeight = chartHeight2d - chartPadding.top - chartPadding.bottom;
+    const truncateChartLabel = (value, limit = 8) => {
+      const text = safeString(value);
+      return text.length > limit ? `${text.slice(0, limit)}...` : text;
+    };
+    const renderGridLines = (maxValue, formatter = value => value) => chartGridLines.map(percent => {
+      const y = chartPadding.top + plotHeight - (percent / 100) * plotHeight;
+      const value = Math.round((percent / 100) * maxValue);
+      return `
+        <line x1="${chartPadding.left}" y1="${y}" x2="${chartPadding.left + plotWidth}" y2="${y}" class="report-2d-grid"></line>
+        <text x="${chartPadding.left - 10}" y="${y + 4}" class="report-2d-axis-label" text-anchor="end">${escapeHtml(formatter(value))}</text>
+      `;
+    }).join('');
+    const renderBarChartSvg = (items, options) => {
+      const maxValue = Math.max(options.maxValue || 0, ...items.map(item => item.value), 1);
+      const band = plotWidth / Math.max(items.length, 1);
+      const barWidth = Math.min(48, Math.max(18, band * 0.58));
+      const bars = items.map((item, index) => {
+        const h = Math.max(2, (item.value / maxValue) * plotHeight);
+        const x = chartPadding.left + index * band + (band - barWidth) / 2;
+        const y = chartPadding.top + plotHeight - h;
+        const labelX = chartPadding.left + index * band + band / 2;
+        return `
+          <g class="report-2d-bar-group">
+            <rect x="${x}" y="${y}" width="${barWidth}" height="${h}" rx="7" class="report-2d-bar ${item.className || ''}"></rect>
+            <text x="${labelX}" y="${y - 8}" class="report-2d-value" text-anchor="middle">${escapeHtml(item.valueLabel)}</text>
+            <text x="${labelX}" y="${chartPadding.top + plotHeight + 24}" class="report-2d-x-label" text-anchor="middle">${escapeHtml(truncateChartLabel(item.label, options.labelLimit || 8))}</text>
+          </g>
+        `;
+      }).join('');
+      return `
+        <svg class="report-2d-chart-svg" viewBox="0 0 ${chartWidth2d} ${chartHeight2d}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeHtml(options.title)}">
+          <rect x="0" y="0" width="${chartWidth2d}" height="${chartHeight2d}" rx="16" class="report-2d-bg"></rect>
+          ${renderGridLines(maxValue, options.axisFormatter)}
+          <line x1="${chartPadding.left}" y1="${chartPadding.top + plotHeight}" x2="${chartPadding.left + plotWidth}" y2="${chartPadding.top + plotHeight}" class="report-2d-axis"></line>
+          <line x1="${chartPadding.left}" y1="${chartPadding.top}" x2="${chartPadding.left}" y2="${chartPadding.top + plotHeight}" class="report-2d-axis"></line>
+          ${bars}
+        </svg>
+      `;
+    };
+    const renderScatterChartSvg = (items, options) => {
+      const maxX = Math.max(options.maxX || 0, ...items.map(item => item.x), 1);
+      const xTicks = Array.from(new Set([0, Math.ceil(maxX / 2), maxX]));
+      const xGrid = xTicks.map(value => {
+        const x = chartPadding.left + (value / maxX) * plotWidth;
+        return `
+          <line x1="${x}" y1="${chartPadding.top}" x2="${x}" y2="${chartPadding.top + plotHeight}" class="report-2d-grid subtle"></line>
+          <text x="${x}" y="${chartPadding.top + plotHeight + 42}" class="report-2d-axis-label" text-anchor="middle">${value}</text>
+        `;
+      }).join('');
+      const points = items.map((item, index) => {
+        const x = chartPadding.left + (item.x / maxX) * plotWidth;
+        const y = chartPadding.top + plotHeight - (Math.max(0, Math.min(100, item.y)) / 100) * plotHeight;
+        const labelAnchor = x > chartPadding.left + plotWidth - 90 ? 'end' : 'start';
+        const labelX = labelAnchor === 'end' ? x - 12 : x + 12;
+        const labelY = y + (index % 2 === 0 ? -10 : 16);
+        const pointClass = item.y < 60 ? 'low' : item.y >= 85 ? 'strong' : '';
+        return `
+          <g class="report-2d-point-group">
+            <circle cx="${x}" cy="${y}" r="8" class="report-2d-point ${pointClass}"></circle>
+            <text x="${labelX}" y="${labelY}" class="report-2d-point-label" text-anchor="${labelAnchor}">${escapeHtml(truncateChartLabel(item.label, 9))}</text>
+            <title>${escapeHtml(item.label)}：复习 ${item.x} 次，熟练度 ${item.y}%</title>
+          </g>
+        `;
+      }).join('');
+      return `
+        <svg class="report-2d-chart-svg report-scatter-svg" viewBox="0 0 ${chartWidth2d} ${chartHeight2d}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeHtml(options.title)}">
+          <rect x="0" y="0" width="${chartWidth2d}" height="${chartHeight2d}" rx="16" class="report-2d-bg"></rect>
+          ${renderGridLines(100, value => `${value}%`)}
+          ${xGrid}
+          <line x1="${chartPadding.left}" y1="${chartPadding.top + plotHeight}" x2="${chartPadding.left + plotWidth}" y2="${chartPadding.top + plotHeight}" class="report-2d-axis"></line>
+          <line x1="${chartPadding.left}" y1="${chartPadding.top}" x2="${chartPadding.left}" y2="${chartPadding.top + plotHeight}" class="report-2d-axis"></line>
+          <text x="${chartPadding.left + plotWidth / 2}" y="${chartHeight2d - 8}" class="report-2d-axis-title" text-anchor="middle">复习次数</text>
+          <text x="16" y="${chartPadding.top + plotHeight / 2}" class="report-2d-axis-title vertical" text-anchor="middle" transform="rotate(-90 16 ${chartPadding.top + plotHeight / 2})">熟练度</text>
+          ${points}
+        </svg>
+      `;
+    };
+    const articleMasteryChartSvg = articleMasteryStats.length
+      ? renderScatterChartSvg(articleMasteryStats.map(item => ({
+          label: item.title,
+          x: item.reviews,
+          y: item.mastery,
+        })), {
+          title: '文章熟练度',
+          maxX: Math.max(...articleMasteryStats.map(item => item.reviews), 1),
+        })
+      : '';
+    const todayDistributionChartSvg = todayReviewDistribution.length
+      ? renderBarChartSvg(todayReviewDistribution.slice(0, 8).map(item => ({
+          label: item.title,
+          value: Math.max(1, Math.round(item.ms / 1000)),
+          valueLabel: formatDuration(item.ms),
+          className: item.word ? 'word-bar' : '',
+        })), {
+          title: '今天复习时间分布',
+          maxValue: Math.max(1, Math.round(maxTodayDistributionMs / 1000)),
+          axisFormatter: value => formatDuration(value * 1000),
+        })
+      : '';
     const totalMistakeWords = wordBook.length;
     const masteredMistakeWords = wordBook.filter(item => (item.masteryScore || 0) >= 90).length;
     const activeMistakeWords = wordBook.filter(item => (item.masteryScore || 0) < 90).length;
     const avgMistakeWordMastery = totalMistakeWords
       ? Math.round(wordBook.reduce((sum, item) => sum + (item.masteryScore || 0), 0) / totalMistakeWords)
       : 0;
-    const mostImprovedWords = wordBook
-      .slice()
-      .sort((a, b) => (b.masteryScore || 0) - (a.masteryScore || 0) || (b.reviewCount || 0) - (a.reviewCount || 0))
-      .slice(0, 6);
-    const stillWeakWords = wordBook
+    const weakestWords = wordBook
       .slice()
       .sort((a, b) => (a.masteryScore || 0) - (b.masteryScore || 0) || (b.count || 0) - (a.count || 0))
+      .slice(0, 6);
+    const mostReviewedUnmasteredWords = wordBook
+      .filter(item => (item.masteryScore || 0) < 100)
+      .sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0) || (a.masteryScore || 0) - (b.masteryScore || 0) || (b.count || 0) - (a.count || 0))
       .slice(0, 6);
     const strongestSignal = overall >= 85
       ? '状态很稳，继续保持节奏'
@@ -2049,7 +2308,7 @@ function showReport() {
         ? '正在进入稳定区，再推一把'
         : '先把基础复习节奏跑起来';
     const nextFocus = weakestSentences[0]
-      ? `下一步优先复习：“${escapeHtml(weakestSentences[0].articleTitle)}”里的薄弱句子。`
+      ? `下一步优先复习：“${escapeHtml(weakestSentences[0].articleTitle)}”里的低熟练度内容。`
       : activeMistakeWords > 0
         ? '下一步优先清理仍需复习的错词。'
         : '当前薄弱项不多，可以开始挑战新文章。';
@@ -2164,20 +2423,8 @@ function showReport() {
       </div>
       <div class="mistake-report-grid">
         <div class="report-summary-block">
-          <h4>进步最好的单词</h4>
-          ${mostImprovedWords.length ? mostImprovedWords.map(item => `
-            <div class="report-weak-row">
-              <div>
-                <div class="report-row-title">${escapeHtml(item.word)}</div>
-                <div class="report-row-value">错题 ${item.count || 0} 次 · 复习 ${item.reviewCount || 0} 次</div>
-              </div>
-              <span class="report-score-pill">${Math.round(item.masteryScore || 0)}%</span>
-            </div>
-          `).join('') : '<div class="empty-state">暂无错词数据。</div>'}
-        </div>
-        <div class="report-summary-block">
-          <h4>仍然薄弱的单词</h4>
-          ${stillWeakWords.length ? stillWeakWords.map(item => `
+          <h4>最薄弱的单词</h4>
+          ${weakestWords.length ? weakestWords.map(item => `
             <div class="report-weak-row">
               <div>
                 <div class="report-row-title">${escapeHtml(item.word)}</div>
@@ -2187,57 +2434,33 @@ function showReport() {
             </div>
           `).join('') : '<div class="empty-state">暂无薄弱错词。</div>'}
         </div>
-      </div>
-      <div class="report-charts">
-        <div class="report-chart-card">
-          <div class="report-chart-title">文章复习活跃度</div>
-          ${articleReviewChart.length ? articleReviewChart.map(item => `
-            <div class="report-chart-row">
-              <div class="report-chart-label">${escapeHtml(item.title)}</div>
-              <div class="report-bar report-bar-small report-chart-bar">
-                <div class="report-bar-fill" style="width:${Math.min(100, item.count * 12)}%"></div>
-              </div>
-              <div class="report-chart-value">${item.count} 次</div>
-            </div>
-          `).join('') : '<div class="empty-state">暂无复习数据。</div>'}
-        </div>
-        <div class="report-chart-card">
-          <div class="report-chart-title">文章熟练度分布</div>
-          ${articleMasteryChart.length ? articleMasteryChart.map(item => `
-            <div class="report-chart-row">
-              <div class="report-chart-label">${escapeHtml(item.title)}</div>
-              <div class="report-bar report-bar-small report-chart-bar">
-                <div class="report-bar-fill" style="width:${item.mastery}%"></div>
-              </div>
-              <div class="report-chart-value">${item.mastery}%</div>
-            </div>
-          `).join('') : '<div class="empty-state">暂无文章数据。</div>'}
-        </div>
-      </div>
-      <div class="report-weak-grid">
         <div class="report-summary-block">
-          <h4>薄弱文章</h4>
-          ${weakestArticles.length ? weakestArticles.map(item => `
+          <h4>复习最多但未掌握</h4>
+          ${mostReviewedUnmasteredWords.length ? mostReviewedUnmasteredWords.map(item => `
             <div class="report-weak-row">
               <div>
-                <div class="report-row-title">${escapeHtml(item.title)}</div>
-                <div class="report-row-value">复习 ${item.reviews} 次</div>
+                <div class="report-row-title">${escapeHtml(item.word)}</div>
+                <div class="report-row-value">错题 ${item.count || 0} 次 · 复习 ${item.reviewCount || 0} 次</div>
               </div>
-              <span class="report-score-pill ${item.mastery < 70 ? 'warning' : ''}">${item.mastery}%</span>
+              <span class="report-score-pill ${(item.masteryScore || 0) < 70 ? 'warning' : ''}">${Math.round(item.masteryScore || 0)}%</span>
             </div>
-          `).join('') : '<div class="empty-state">暂无文章熟练度数据。</div>'}
+          `).join('') : '<div class="empty-state">暂无反复复习后仍未掌握的单词。</div>'}
         </div>
-        <div class="report-summary-block">
-          <h4>薄弱句子</h4>
-          ${weakestSentences.length ? weakestSentences.map(item => `
-            <div class="report-weak-row">
-              <div>
-                <div class="report-row-title">${escapeHtml(item.text)}</div>
-                <div class="report-row-value">${escapeHtml(item.articleTitle)}</div>
-              </div>
-              <span class="report-score-pill ${item.score < 70 ? 'warning' : ''}">${Math.round(item.score)}%</span>
-            </div>
-          `).join('') : '<div class="empty-state">暂无薄弱句子。</div>'}
+      </div>
+      <div class="report-focus-grid">
+        <div class="report-summary-block report-2d-card">
+          <div class="report-2d-header">
+            <h4>文章熟练度</h4>
+            <span>横轴复习次数，纵轴熟练度</span>
+          </div>
+          ${articleMasteryChartSvg || '<div class="empty-state">暂无文章熟练度数据。</div>'}
+        </div>
+        <div class="report-summary-block report-2d-card">
+          <div class="report-2d-header">
+            <h4>今天复习时间分布</h4>
+            <span>文章分别统计，单词合并统计</span>
+          </div>
+          ${todayDistributionChartSvg || '<div class="empty-state">今天还没有可统计的复习时间。</div>'}
         </div>
       </div>
     `;
@@ -2690,16 +2913,19 @@ function speakWordText(text) {
 }
 
 function startWordReview(wordId = null, options = {}) {
+  stopWordListReading({ keepPanel: true, silent: true });
   const ids = wordId
     ? [wordId]
     : wordBook
         .filter(item => !options.onlyUnmastered || toNumber(item.masteryScore, 0) < 100)
+        .sort((a, b) => (b.count || 0) - (a.count || 0) || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0))
         .map(item => item.id);
   if (!ids.length) {
     alert(options.onlyUnmastered ? '当前没有未掌握的错词可复习。' : '错题本当前没有错词可复习。');
     return;
   }
   currentReview = {
+    sessionId: generateId(),
     type: 'word',
     wordIds: ids,
     index: 0,
@@ -2708,6 +2934,7 @@ function startWordReview(wordId = null, options = {}) {
     startTime: Date.now(),
     onlyUnmastered: !!options.onlyUnmastered,
     waitingForManualSummary: false,
+    autoAdvanceTimer: null,
     returnPage: 'wordbook',
   };
   if (elements.endReview) elements.endReview.textContent = '结束复习';
@@ -2734,6 +2961,10 @@ function showFeedback(message, type = 'info') {
 
 function completeReview(options = {}) {
   if (!currentReview || currentReview.completed) return;
+  if (currentReview.autoAdvanceTimer) {
+    clearTimeout(currentReview.autoAdvanceTimer);
+    currentReview.autoAdvanceTimer = null;
+  }
   if (currentReview.waitingForManualSummary && !options.manual) {
     showFeedback('最后一项已提交。请点击“完成复习”或“结束复习”查看本次总结。', 'info');
     return;
@@ -2741,6 +2972,7 @@ function completeReview(options = {}) {
   currentReview.completed = true;
   stopReviewTimer();
   const summary = {
+    type: currentReview.type || 'sentence',
     total: currentReview.type === 'word' ? currentReview.wordIds.length : currentReview.sentenceIds.length,
     completedCount: currentReview.doneIds ? currentReview.doneIds.size : currentReview.sessionScores.length,
     isPartial: currentReview.doneIds ? currentReview.doneIds.size < (currentReview.type === 'word' ? currentReview.wordIds.length : currentReview.sentenceIds.length) : false,
@@ -2757,6 +2989,23 @@ function completeReview(options = {}) {
   };
   if (currentReview.startTime) {
     summary.duration = Date.now() - currentReview.startTime;
+  }
+
+  if (currentReview.type === 'word' && currentReview.startTime && !currentReview.sessionRecorded) {
+    currentReview.sessionRecorded = true;
+    const sessionId = currentReview.sessionId || `word-${currentReview.startTime}`;
+    const alreadyRecorded = wordReviewSessions.some(session => session && session.sessionId === sessionId);
+    if (!alreadyRecorded) {
+      wordReviewSessions.push({
+        sessionId,
+        timestamp: new Date().toISOString(),
+        duration: summary.duration,
+        averageScore: summary.average,
+        reviewedCount: currentReview.doneIds.size,
+      });
+      wordReviewSessions = normalizeWordReviewSessions(wordReviewSessions).slice(-120);
+      saveWordReviewSessions();
+    }
   }
 
   // Record review time (sentence review only, not word review)
@@ -2816,6 +3065,7 @@ function clearReviewSummary() {
 function renderReviewSummary(summary) {
   if (!elements.reviewSummary) return;
   const incorrectItems = summary.scores.filter(item => item.score < 90);
+  const isWordReview = summary.type === 'word';
   const lines = summary.scores.map(item => `
     <div>
       <strong>【${item.score}%】</strong> ${escapeHtml(item.sentence)}
@@ -2823,7 +3073,7 @@ function renderReviewSummary(summary) {
   `).join('');
   const mistakeHtml = incorrectItems.length
     ? `<div class="review-summary-block">
-        <h4>本次错误总结</h4>
+        <h4>${isWordReview ? '本次错词结果' : '本次错误总结'}</h4>
         ${incorrectItems.map(item => `
           <div class="review-sentence-compare">
             <div class="review-sentence-row review-sentence-original">
@@ -2845,7 +3095,7 @@ function renderReviewSummary(summary) {
   const durationText = summary.duration ? `本次用时：${formatDuration(summary.duration)}` : '';
   elements.reviewSummary.innerHTML = `
     <div class="review-summary-header">
-      <h3>${summary.isPartial ? '本轮复习总结' : '复习完成'}</h3>
+      <h3>${summary.isPartial ? '本轮复习总结' : (isWordReview ? '错词复习完成' : '复习完成')}</h3>
       <div class="review-summary-score">平均得分：${summary.average}%</div>
     </div>
     <div class="review-summary-body">
