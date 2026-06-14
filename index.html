@@ -197,6 +197,20 @@
         <button id="wordbook-review-unmastered" class="btn btn-secondary">只复习未掌握单词</button>
         <button id="wordbook-read-unmastered" class="btn btn-secondary">列表播放未掌握单词</button>
       </div>
+      <section class="wordbook-calendar-panel">
+        <div class="wordbook-calendar-header">
+          <div>
+            <h3>错题本复习日历</h3>
+            <p>每一列是一周，颜色越深代表当天复习的错词越多。</p>
+          </div>
+          <div class="wordbook-calendar-controls">
+            <button id="wordbook-calendar-prev" type="button" class="btn btn-small btn-secondary" aria-label="上一年">◀</button>
+            <strong id="wordbook-calendar-year">2026</strong>
+            <button id="wordbook-calendar-next" type="button" class="btn btn-small btn-secondary" aria-label="下一年">▶</button>
+          </div>
+        </div>
+        <div id="wordbook-calendar" class="wordbook-calendar"></div>
+      </section>
       <div id="wordbook-reading-panel" class="wordbook-reading-panel hidden">
         <div class="wordbook-reading-header">
           <div>
@@ -326,7 +340,7 @@
             <span id="review-sentence-tags"></span>
           </div>
           <div class="sentence-controls">
-            <button id="play-sentence" class="btn btn-primary" aria-label="播放句子音频" title="播放句子音频">▶</button>
+            <button id="play-sentence" class="btn btn-primary" aria-label="播放句子音频" title="播放音频（⌥ + Space）">▶</button>
             <button id="show-answer" class="btn btn-secondary">显示正确文本</button>
           </div>
         </div>

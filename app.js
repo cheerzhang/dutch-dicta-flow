@@ -3,8 +3,8 @@ const WORD_BOOK_KEY = 'dutchDictaWordBook';
 const WORD_REVIEW_SESSIONS_KEY = 'dutchDictaWordReviewSessions';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
-const BACKUP_VERSION = 7;
-const REPORT_SCHEMA_VERSION = 5;
+const BACKUP_VERSION = 8;
+const REPORT_SCHEMA_VERSION = 6;
 
 let articles = [];
 let wordBook = [];
@@ -22,6 +22,7 @@ let wordReadingState = {
   currentAudio: null,
 };
 let masteredArchiveOpen = false;
+let wordbookCalendarYear = new Date().getFullYear();
 
 const elements = {
   articleForm: document.getElementById('article-form'),
@@ -93,6 +94,10 @@ const elements = {
   wordbookReviewAll: document.getElementById('wordbook-review-all'),
   wordbookReviewUnmastered: document.getElementById('wordbook-review-unmastered'),
   wordbookReadUnmastered: document.getElementById('wordbook-read-unmastered'),
+  wordbookCalendar: document.getElementById('wordbook-calendar'),
+  wordbookCalendarYear: document.getElementById('wordbook-calendar-year'),
+  wordbookCalendarPrev: document.getElementById('wordbook-calendar-prev'),
+  wordbookCalendarNext: document.getElementById('wordbook-calendar-next'),
   wordbookReadingPanel: document.getElementById('wordbook-reading-panel'),
   wordbookReadingList: document.getElementById('wordbook-reading-list'),
   wordbookStopReading: document.getElementById('wordbook-stop-reading'),
@@ -190,6 +195,18 @@ function bindEvents() {
   }
   if (elements.wordbookReadUnmastered) {
     elements.wordbookReadUnmastered.addEventListener('click', startWordListReading);
+  }
+  if (elements.wordbookCalendarPrev) {
+    elements.wordbookCalendarPrev.addEventListener('click', () => {
+      wordbookCalendarYear -= 1;
+      renderWordBookCalendar();
+    });
+  }
+  if (elements.wordbookCalendarNext) {
+    elements.wordbookCalendarNext.addEventListener('click', () => {
+      wordbookCalendarYear += 1;
+      renderWordBookCalendar();
+    });
   }
   if (elements.wordbookStopReading) {
     elements.wordbookStopReading.addEventListener('click', stopWordListReading);
@@ -306,11 +323,7 @@ function bindEvents() {
   if (navButtons && navButtons.forEach) {
     navButtons.forEach(btn => btn.addEventListener('click', handlePageNav));
   }
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && elements.wordbookEditPanel && !elements.wordbookEditPanel.classList.contains('hidden')) {
-      closeWordBookEditPanel();
-    }
-  });
+  document.addEventListener('keydown', handleGlobalKeydown);
 }
 
 let playAllState = {
@@ -578,6 +591,26 @@ function handleDictationInputKeydown(event) {
     handleSubmitAnswer();
   } else if (!elements.nextSentence.disabled) {
     showNextSentence();
+  }
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key === 'Escape' && elements.wordbookEditPanel && !elements.wordbookEditPanel.classList.contains('hidden')) {
+    closeWordBookEditPanel();
+    return;
+  }
+
+  const key = String(event.key || '').toLowerCase();
+  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (key === ' ' || key === 'spacebar')) {
+    if (!currentReview || currentReview.completed) return;
+    if (elements.reviewPanel?.classList.contains('hidden')) return;
+    if (elements.wordbookEditPanel && !elements.wordbookEditPanel.classList.contains('hidden')) return;
+    if (elements.playSentence?.disabled) return;
+
+    event.preventDefault();
+    playCurrentSentenceAudio().catch(error => {
+      console.warn('快捷键播放音频失败：', error && error.message);
+    });
   }
 }
 
@@ -1360,6 +1393,156 @@ function getAudioUrl(audioId) {
         scoredSessionCount: daySessions.length,
       };
     });
+    const calendarYear = now.getFullYear();
+    const getStudyCalendarLevel = duration => {
+      if (!duration) return 0;
+      if (duration <= 5 * 60 * 1000) return 1;
+      if (duration <= 15 * 60 * 1000) return 2;
+      if (duration <= 30 * 60 * 1000) return 3;
+      return 4;
+    };
+    const getWordCalendarLevel = count => {
+      if (!count) return 0;
+      if (count <= 2) return 1;
+      if (count <= 5) return 2;
+      if (count <= 9) return 3;
+      return 4;
+    };
+    const serializeStudyCalendar = year => {
+      const days = [];
+      const firstDay = new Date(year, 0, 1);
+      const daysInYear = Math.round((new Date(year + 1, 0, 1) - firstDay) / oneDayMs);
+      for (let i = 0; i < daysInYear; i += 1) {
+        const date = new Date(year, 0, 1 + i);
+        const key = dateKey(date);
+        const daySessions = timedStudySessions.filter(session => dateKey(new Date(session.timestamp)) === key);
+        const duration = daySessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+        const scoredSessions = daySessions.filter(session => toNumber(session.averageScore, 0) > 0);
+        const averageScore = scoredSessions.length
+          ? Math.round(scoredSessions.reduce((sum, session) => sum + toNumber(session.averageScore, 0), 0) / scoredSessions.length)
+          : 0;
+        days.push({
+          date: key,
+          week: Math.floor((i + firstDay.getDay()) / 7) + 1,
+          weekday: date.getDay(),
+          duration,
+          sessionCount: daySessions.length,
+          averageScore,
+          level: getStudyCalendarLevel(duration),
+        });
+      }
+      return {
+        year,
+        weekCount: Math.ceil((daysInYear + firstDay.getDay()) / 7),
+        activeDays: days.filter(day => day.duration > 0).length,
+        totalDuration: days.reduce((sum, day) => sum + day.duration, 0),
+        maxDayDuration: days.reduce((max, day) => Math.max(max, day.duration), 0),
+        levelBasis: [
+          { level: 0, label: '0' },
+          { level: 1, label: '<=5min' },
+          { level: 2, label: '<=15min' },
+          { level: 3, label: '<=30min' },
+          { level: 4, label: '>30min' },
+        ],
+        days,
+      };
+    };
+    const serializeWordBookCalendar = year => {
+      const activity = new Map();
+      const ensureDay = key => {
+        if (!activity.has(key)) {
+          activity.set(key, {
+            reviewedCount: 0,
+            sessionCount: 0,
+            duration: 0,
+            scoreTotal: 0,
+            scoredCount: 0,
+          });
+        }
+        return activity.get(key);
+      };
+      const sessionDates = new Set();
+      normalizedWordReviewSessions.forEach(session => {
+        const date = new Date(session.timestamp);
+        if (Number.isNaN(date.getTime()) || date.getFullYear() !== year) return;
+        const key = dateKey(date);
+        const day = ensureDay(key);
+        day.reviewedCount += Math.max(1, toNumber(session.reviewedCount, 0));
+        day.sessionCount += 1;
+        day.duration += toNumber(session.duration, 0);
+        if (toNumber(session.averageScore, 0) > 0) {
+          day.scoreTotal += toNumber(session.averageScore, 0);
+          day.scoredCount += 1;
+        }
+        sessionDates.add(key);
+      });
+      normalizedWordBook.forEach(word => {
+        (Array.isArray(word.history) ? word.history : []).forEach(entry => {
+          const date = new Date(entry.timestamp);
+          if (Number.isNaN(date.getTime()) || date.getFullYear() !== year) return;
+          const key = dateKey(date);
+          if (sessionDates.has(key)) return;
+          const day = ensureDay(key);
+          day.reviewedCount += 1;
+          if (toNumber(entry.score, 0) > 0) {
+            day.scoreTotal += toNumber(entry.score, 0);
+            day.scoredCount += 1;
+          }
+        });
+      });
+
+      const days = [];
+      const firstDay = new Date(year, 0, 1);
+      const daysInYear = Math.round((new Date(year + 1, 0, 1) - firstDay) / oneDayMs);
+      for (let i = 0; i < daysInYear; i += 1) {
+        const date = new Date(year, 0, 1 + i);
+        const key = dateKey(date);
+        const day = activity.get(key);
+        const reviewedCount = day?.reviewedCount || 0;
+        days.push({
+          date: key,
+          week: Math.floor((i + firstDay.getDay()) / 7) + 1,
+          weekday: date.getDay(),
+          reviewedCount,
+          sessionCount: day?.sessionCount || 0,
+          duration: day?.duration || 0,
+          averageScore: day?.scoredCount ? Math.round(day.scoreTotal / day.scoredCount) : 0,
+          level: getWordCalendarLevel(reviewedCount),
+        });
+      }
+      return {
+        year,
+        weekCount: Math.ceil((daysInYear + firstDay.getDay()) / 7),
+        activeDays: days.filter(day => day.reviewedCount > 0).length,
+        totalReviewed: days.reduce((sum, day) => sum + day.reviewedCount, 0),
+        maxDayReviewed: days.reduce((max, day) => Math.max(max, day.reviewedCount), 0),
+        levelBasis: [
+          { level: 0, label: '0' },
+          { level: 1, label: '1-2' },
+          { level: 2, label: '3-5' },
+          { level: 3, label: '6-9' },
+          { level: 4, label: '10+' },
+        ],
+        days,
+      };
+    };
+    const studyCalendarYears = Array.from(new Set(timedStudySessions
+      .map(session => new Date(session.timestamp))
+      .filter(date => !Number.isNaN(date.getTime()))
+      .map(date => date.getFullYear())
+      .concat(calendarYear)))
+      .sort((a, b) => a - b);
+    const wordBookCalendarYears = Array.from(new Set([
+      ...normalizedWordReviewSessions
+        .map(session => new Date(session.timestamp))
+        .filter(date => !Number.isNaN(date.getTime()))
+        .map(date => date.getFullYear()),
+      ...normalizedWordBook.flatMap(word => (Array.isArray(word.history) ? word.history : [])
+        .map(entry => new Date(entry.timestamp))
+        .filter(date => !Number.isNaN(date.getTime()))
+        .map(date => date.getFullYear())),
+      calendarYear,
+    ])).sort((a, b) => a - b);
 
     const reviewedUnits = Math.max(1, sentenceHistory.length + normalizedWordReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
     const avgMsPerUnit = Math.min(180000, Math.max(20000, Math.round(totalDuration / reviewedUnits) || 60000));
@@ -1450,6 +1633,15 @@ function getAudioUrl(audioId) {
           sentenceCount: item.sentenceCount,
         })),
       },
+      calendars: {
+        currentYear: calendarYear,
+        availableYears: {
+          study: studyCalendarYears,
+          wordBook: wordBookCalendarYears,
+        },
+        study: serializeStudyCalendar(calendarYear),
+        wordBook: serializeWordBookCalendar(calendarYear),
+      },
       lists: {
         priorityArticles: articleMastery
           .filter(item => item.mastery < 90)
@@ -1482,6 +1674,7 @@ function getAudioUrl(audioId) {
         'wordBook',
         'wordReviewSessions',
         'reportData',
+        'calendarSnapshots',
         'audioFiles',
       ],
       articles: normalizedArticles,
@@ -2095,8 +2288,10 @@ async function renderReviewItem() {
     elements.dictationInput.value = '';
     elements.dictationInput.placeholder = '输入这个错词的荷兰语拼写，按 Enter 提交';
     updateDictationInputLabel('输入错词拼写');
-    elements.submitAnswer.textContent = '提交并继续';
+    elements.submitAnswer.textContent = '提交答案';
+    elements.submitAnswer.disabled = false;
     elements.nextSentence.classList.add('hidden');
+    elements.nextSentence.disabled = true;
     elements.showAnswer.classList.toggle('hidden', !word.translation && !(word.examples && word.examples.length));
     showFeedback('', '');
     clearReviewSummary();
@@ -2226,19 +2421,14 @@ function handleSubmitAnswer() {
     elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
     renderWordReviewResult(word, score, answer);
     elements.submitAnswer.disabled = true;
+    elements.nextSentence.classList.remove('hidden');
     elements.nextSentence.disabled = false;
     if (currentReview.doneIds.size >= currentReview.wordIds.length) {
       currentReview.waitingForManualSummary = true;
       updateReviewNavigationLabel(currentReview.wordIds.length, currentReview.wordIds.length);
-      currentReview.autoAdvanceTimer = setTimeout(() => {
-        currentReview.autoAdvanceTimer = null;
-        completeReview({ manual: true });
-      }, 850);
+      elements.nextSentence.textContent = '查看总结';
     } else {
-      currentReview.autoAdvanceTimer = setTimeout(() => {
-        currentReview.autoAdvanceTimer = null;
-        showNextSentence();
-      }, 700);
+      elements.nextSentence.textContent = '下一词';
     }
     return;
   }
@@ -3187,6 +3377,106 @@ function showReport() {
           labelLimit: 5,
         })
       : '';
+    const getStudyCalendarLevel = ms => {
+      if (!ms) return 0;
+      if (ms <= 5 * 60 * 1000) return 1;
+      if (ms <= 15 * 60 * 1000) return 2;
+      if (ms <= 30 * 60 * 1000) return 3;
+      return 4;
+    };
+    const renderStudyActivityCalendar = year => {
+      const activity = new Map();
+      timedStudySessions.forEach(session => {
+        const date = new Date(session.timestamp);
+        if (Number.isNaN(date.getTime()) || date.getFullYear() !== year) return;
+        const key = dateKey(date);
+        if (!activity.has(key)) {
+          activity.set(key, {
+            duration: 0,
+            sessionCount: 0,
+            scoreTotal: 0,
+            scoredCount: 0,
+          });
+        }
+        const day = activity.get(key);
+        day.duration += toNumber(session.duration, 0);
+        day.sessionCount += 1;
+        if (toNumber(session.averageScore, 0) > 0) {
+          day.scoreTotal += toNumber(session.averageScore, 0);
+          day.scoredCount += 1;
+        }
+      });
+
+      const firstDay = new Date(year, 0, 1);
+      const daysInYear = Math.round((new Date(year + 1, 0, 1) - firstDay) / oneDayMs);
+      const firstWeekday = firstDay.getDay();
+      const weekCount = Math.ceil((daysInYear + firstWeekday) / 7);
+      const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+      const activeYearDays = Array.from(activity.values()).filter(day => day.duration > 0).length;
+      const totalYearMs = Array.from(activity.values()).reduce((sum, day) => sum + day.duration, 0);
+      const bestDay = Array.from(activity.entries()).sort((a, b) => b[1].duration - a[1].duration)[0];
+      const weekLabels = Array.from({ length: weekCount }, (_, index) => `
+        <span class="wordbook-calendar-week-label" title="第 ${index + 1} 周">${index + 1}</span>
+      `).join('');
+      const rows = dayLabels.map((label, rowIndex) => {
+        const cells = Array.from({ length: weekCount }, (_, columnIndex) => {
+          const dayOffset = columnIndex * 7 + rowIndex - firstWeekday;
+          if (dayOffset < 0 || dayOffset >= daysInYear) {
+            return '<span class="wordbook-calendar-cell empty" aria-hidden="true"></span>';
+          }
+          const date = new Date(year, 0, 1 + dayOffset);
+          const key = dateKey(date);
+          const day = activity.get(key);
+          const duration = day?.duration || 0;
+          const avgScore = day?.scoredCount ? Math.round(day.scoreTotal / day.scoredCount) : 0;
+          const title = `${key} · 第 ${columnIndex + 1} 周 · 学习 ${formatDuration(duration)} · ${day?.sessionCount || 0} 轮${avgScore ? ` · 平均 ${avgScore}%` : ''}`;
+          return `<span class="wordbook-calendar-cell level-${getStudyCalendarLevel(duration)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
+        }).join('');
+        return `
+          <div class="wordbook-calendar-row">
+            <span class="wordbook-calendar-day-label">${label}</span>
+            ${cells}
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="wordbook-calendar-panel report-calendar-panel">
+          <div class="wordbook-calendar-header">
+            <div>
+              <h3>${year} 年学习日历</h3>
+              <p>每一列是一周，颜色越深代表当天学习时间越长。</p>
+            </div>
+          </div>
+          <div class="wordbook-calendar">
+            <div class="wordbook-calendar-summary">
+              <span><strong>${formatDuration(totalYearMs)}</strong> 年度学习</span>
+              <span><strong>${activeYearDays}</strong> 活跃天</span>
+              <span><strong>${bestDay ? formatDuration(bestDay[1].duration) : '0秒'}</strong> 单日最多</span>
+            </div>
+            <div class="wordbook-calendar-scroll">
+              <div class="wordbook-calendar-grid" style="--calendar-weeks:${weekCount}">
+                <div class="wordbook-calendar-week-row">
+                  <span></span>
+                  ${weekLabels}
+                </div>
+                ${rows}
+              </div>
+            </div>
+            <div class="wordbook-calendar-legend">
+              <span>少</span>
+              <i class="level-0"></i>
+              <i class="level-1"></i>
+              <i class="level-2"></i>
+              <i class="level-3"></i>
+              <i class="level-4"></i>
+              <span>多</span>
+            </div>
+          </div>
+        </div>
+      `;
+    };
+    const studyActivityCalendarHtml = renderStudyActivityCalendar(now.getFullYear());
     const topPriorityArticles = articleMasteryStats
       .filter(item => item.mastery < 90)
       .slice(0, 5);
@@ -3328,6 +3618,7 @@ function showReport() {
               <div class="progress-card-value">${currentStreak}天</div>
             </div>
           </div>
+          ${studyActivityCalendarHtml}
           <div class="report-focus-grid">
             <div class="study-chart-card">
               <div class="study-chart-title">最近 30 天学习时间</div>
@@ -3571,6 +3862,7 @@ function renderWordBookPage() {
   if (elements.wordbookReviewUnmastered) elements.wordbookReviewUnmastered.disabled = pending === 0;
   if (elements.wordbookReadUnmastered) elements.wordbookReadUnmastered.disabled = pending === 0;
   if (elements.wordbookStopReading && !wordReadingState.active) elements.wordbookStopReading.disabled = true;
+  renderWordBookCalendar();
 
   if (!elements.wordbookList) return;
   if (!wordBook.length) {
@@ -3628,6 +3920,131 @@ function renderWordBookPage() {
     ${renderMasteredArchive()}
   `;
 
+}
+
+function getWordBookDailyActivity(year) {
+  const activity = new Map();
+  const ensureDay = key => {
+    if (!activity.has(key)) {
+      activity.set(key, {
+        reviewedCount: 0,
+        sessionCount: 0,
+        duration: 0,
+        scoreTotal: 0,
+        scoredCount: 0,
+        historyCount: 0,
+      });
+    }
+    return activity.get(key);
+  };
+  const sessionDates = new Set();
+
+  normalizeWordReviewSessions(wordReviewSessions).forEach(session => {
+    const date = new Date(session.timestamp);
+    if (Number.isNaN(date.getTime()) || date.getFullYear() !== year) return;
+    const key = getLocalDateKey(date);
+    const day = ensureDay(key);
+    day.reviewedCount += Math.max(1, toNumber(session.reviewedCount, 0));
+    day.sessionCount += 1;
+    day.duration += toNumber(session.duration, 0);
+    if (toNumber(session.averageScore, 0) > 0) {
+      day.scoreTotal += toNumber(session.averageScore, 0);
+      day.scoredCount += 1;
+    }
+    sessionDates.add(key);
+  });
+
+  wordBook.forEach(word => {
+    (Array.isArray(word.history) ? word.history : []).forEach(entry => {
+      const date = new Date(entry.timestamp);
+      if (Number.isNaN(date.getTime()) || date.getFullYear() !== year) return;
+      const key = getLocalDateKey(date);
+      if (sessionDates.has(key)) return;
+      const day = ensureDay(key);
+      day.reviewedCount += 1;
+      day.historyCount += 1;
+      if (toNumber(entry.score, 0) > 0) {
+        day.scoreTotal += toNumber(entry.score, 0);
+        day.scoredCount += 1;
+      }
+    });
+  });
+
+  return activity;
+}
+
+function getWordBookCalendarLevel(count) {
+  if (!count) return 0;
+  if (count <= 2) return 1;
+  if (count <= 5) return 2;
+  if (count <= 9) return 3;
+  return 4;
+}
+
+function renderWordBookCalendar() {
+  if (!elements.wordbookCalendar) return;
+  const year = wordbookCalendarYear;
+  if (elements.wordbookCalendarYear) elements.wordbookCalendarYear.textContent = year;
+
+  const activity = getWordBookDailyActivity(year);
+  const firstDay = new Date(year, 0, 1);
+  const daysInYear = Math.round((new Date(year + 1, 0, 1) - firstDay) / (24 * 60 * 60 * 1000));
+  const firstWeekday = firstDay.getDay();
+  const weekCount = Math.ceil((daysInYear + firstWeekday) / 7);
+  const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const totalReviewed = Array.from(activity.values()).reduce((sum, day) => sum + day.reviewedCount, 0);
+  const activeDays = Array.from(activity.values()).filter(day => day.reviewedCount > 0).length;
+  const bestDay = Array.from(activity.entries()).sort((a, b) => b[1].reviewedCount - a[1].reviewedCount)[0];
+  const weekLabels = Array.from({ length: weekCount }, (_, index) => `
+    <span class="wordbook-calendar-week-label" title="第 ${index + 1} 周">${index + 1}</span>
+  `).join('');
+  const rows = dayLabels.map((label, rowIndex) => {
+    const cells = Array.from({ length: weekCount }, (_, columnIndex) => {
+      const dayOffset = columnIndex * 7 + rowIndex - firstWeekday;
+      if (dayOffset < 0 || dayOffset >= daysInYear) {
+        return '<span class="wordbook-calendar-cell empty" aria-hidden="true"></span>';
+      }
+      const date = new Date(year, 0, 1 + dayOffset);
+      const key = getLocalDateKey(date);
+      const day = activity.get(key);
+      const count = day?.reviewedCount || 0;
+      const avgScore = day?.scoredCount ? Math.round(day.scoreTotal / day.scoredCount) : 0;
+      const title = `${key} · 第 ${columnIndex + 1} 周 · 复习 ${count} 个错词${avgScore ? ` · 平均 ${avgScore}%` : ''}${day?.duration ? ` · 用时 ${formatDuration(day.duration)}` : ''}`;
+      return `<span class="wordbook-calendar-cell level-${getWordBookCalendarLevel(count)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
+    }).join('');
+    return `
+      <div class="wordbook-calendar-row">
+        <span class="wordbook-calendar-day-label">${label}</span>
+        ${cells}
+      </div>
+    `;
+  }).join('');
+
+  elements.wordbookCalendar.innerHTML = `
+    <div class="wordbook-calendar-summary">
+      <span><strong>${totalReviewed}</strong> 年度复习错词</span>
+      <span><strong>${activeDays}</strong> 活跃天</span>
+      <span><strong>${bestDay ? bestDay[1].reviewedCount : 0}</strong> 单日最多</span>
+    </div>
+    <div class="wordbook-calendar-scroll">
+      <div class="wordbook-calendar-grid" style="--calendar-weeks:${weekCount}">
+        <div class="wordbook-calendar-week-row">
+          <span></span>
+          ${weekLabels}
+        </div>
+        ${rows}
+      </div>
+    </div>
+    <div class="wordbook-calendar-legend">
+      <span>少</span>
+      <i class="level-0"></i>
+      <i class="level-1"></i>
+      <i class="level-2"></i>
+      <i class="level-3"></i>
+      <i class="level-4"></i>
+      <span>多</span>
+    </div>
+  `;
 }
 
 function renderWordBookCard(item, isMastered = false) {
