@@ -1,16 +1,56 @@
 const STORAGE_KEY = 'dutchDictaArticles';
 const WORD_BOOK_KEY = 'dutchDictaWordBook';
 const WORD_REVIEW_SESSIONS_KEY = 'dutchDictaWordReviewSessions';
+const A2_VOCAB_PROGRESS_KEY = 'dutchDictaA2VocabProgress';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
 const BACKUP_VERSION = 8;
 const REPORT_SCHEMA_VERSION = 6;
+const A2_VOCAB_SCHEMA_VERSION = 1;
+
+const A2_VOCABULARY = [
+  ['bakken', 'bake, fry'], ['bederven', 'spoil'], ['beginnen', 'begin, start'], ['begrijpen', 'understand'], ['bewegen', 'move'],
+  ['bidden', 'pray'], ['bieden', 'offer'], ['bijten', 'bite'], ['binden', 'tie'], ['blazen', 'blow'],
+  ['blijken', 'appear'], ['blijven', 'stay, remain'], ['braden', 'roast'], ['breken', 'break'], ['brengen', 'bring'],
+  ['buigen', 'bend'], ['denken', 'think'], ['doen', 'do'], ['dragen', 'carry, wear'], ['drijven', 'float'],
+  ['drinken', 'drink'], ['druipen', 'drip'], ['eten', 'eat'], ['fluiten', 'whistle'], ['gaan', 'go'],
+  ['gelden', 'apply, be valid'], ['geven', 'give'], ['gieten', 'pour'], ['glijden', 'slip, slide'], ['graven', 'dig'],
+  ['grijpen', 'grab'], ['hangen', 'hang'], ['hebben', 'have'], ['helpen', 'help'], ['heten', 'be called'],
+  ['houden', 'hold'], ['jagen', 'hunt'], ['kiezen', 'choose'], ['kijken', 'look'], ['klimmen', 'climb'],
+  ['klinken', 'sound'], ['komen', 'come'], ['kopen', 'buy'], ['krijgen', 'get, receive'], ['krimpen', 'shrink'],
+  ['kruipen', 'crawl'], ['kunnen', 'be able'], ['lachen', 'laugh'], ['laten', 'let'], ['lezen', 'read'],
+  ['liegen', 'lie'], ['liggen', 'lie'], ['lijken', 'appear, seem'], ['lopen', 'walk'], ['moeten', 'must, should'],
+  ['mogen', 'be allowed to'], ['nemen', 'take'], ['plegen', 'be in the habit of'], ['rijden', 'ride, drive'], ['rijzen', 'rise'],
+  ['roepen', 'call'], ['ruiken', 'smell'], ['scheiden', 'separate'], ['schenken', 'pour, give'], ['scheppen', 'create'],
+  ['scheren', 'shave'], ['schieten', 'shoot'], ['schijnen', 'shine, seem'], ['schrijven', 'write'], ['schrikken', 'be shocked'],
+  ['schuiven', 'push, shove'], ['slaan', 'hit'], ['slapen', 'sleep'], ['sluiten', 'close'], ['snijden', 'cut'],
+  ['spreken', 'speak'], ['springen', 'jump'], ['staan', 'stand'], ['steken', 'stab, sting'], ['stelen', 'steal'],
+  ['sterven', 'die'], ['stijgen', 'climb'], ['treden', 'step'], ['treffen', 'hit'], ['trekken', 'pull'],
+  ['vallen', 'fall'], ['vangen', 'catch'], ['varen', 'sail'], ['vechten', 'fight'], ['verbieden', 'forbid'],
+  ['verdwijnen', 'disappear'], ['vergeten', 'forget'], ['verliezen', 'lose'], ['vermijden', 'avoid'], ['vinden', 'find'],
+  ['vliegen', 'fly'], ['vouwen', 'fold'], ['vragen', 'ask'], ['vriezen', 'freeze'], ['waaien', 'blow'],
+  ['wassen', 'wash'], ['wegen', 'weigh'], ['werpen', 'throw'], ['weten', 'know'], ['wijzen', 'show, point'],
+  ['willen', 'want'], ['winnen', 'win'], ['worden', 'become'], ['wrijven', 'rub'], ['zeggen', 'say'],
+  ['zenden', 'send'], ['zien', 'see'], ['zijn', 'be'], ['zitten', 'sit'], ['zingen', 'sing'],
+  ['zinken', 'sink'], ['zoeken', 'search, look'], ['zullen', 'will, would'], ['zwemmen', 'swim'], ['zweren', 'swear'],
+  ['zwijgen', 'be silent']
+].map(([word, translation], index) => ({
+  id: `a2-verb-${index + 1}`,
+  word,
+  translation,
+  difficulty: 'A2',
+  source: 'Bijlage 3 Onregelmatige werkwoorden',
+  tags: ['A2', '动词'],
+  wordType: 'verb',
+}));
 
 let articles = [];
 let wordBook = [];
 let wordReviewSessions = [];
+let a2VocabProgress = {};
 let selectedArticleId = null;
 let selectedWordBookId = null;
+let selectedWordEditDeck = 'wordbook';
 let currentReview = null;
 let reviewAudio = new Audio();
 let reviewTimer = null;
@@ -103,6 +143,21 @@ const elements = {
   wordbookStopReading: document.getElementById('wordbook-stop-reading'),
   wordbookEditPanel: document.getElementById('wordbook-edit-panel'),
   wordbookEditForm: document.getElementById('wordbook-edit-form'),
+  wordbookEditTitle: document.getElementById('wordbook-edit-title'),
+  a2VocabPanel: document.getElementById('a2-vocab-panel'),
+  a2VocabTotalWords: document.getElementById('a2-vocab-total-words'),
+  a2VocabReviewedWords: document.getElementById('a2-vocab-reviewed-words'),
+  a2VocabOverallMastery: document.getElementById('a2-vocab-overall-mastery'),
+  a2VocabPendingReview: document.getElementById('a2-vocab-pending-review'),
+  a2VocabReviewAll: document.getElementById('a2-vocab-review-all'),
+  a2VocabReviewUnmastered: document.getElementById('a2-vocab-review-unmastered'),
+  a2VocabReviewRandom: document.getElementById('a2-vocab-review-random'),
+  a2VocabReviewCount: document.getElementById('a2-vocab-review-count'),
+  a2VocabReadUnmastered: document.getElementById('a2-vocab-read-unmastered'),
+  a2VocabStopReading: document.getElementById('a2-vocab-stop-reading'),
+  a2VocabReadingPanel: document.getElementById('a2-vocab-reading-panel'),
+  a2VocabReadingList: document.getElementById('a2-vocab-reading-list'),
+  a2VocabList: document.getElementById('a2-vocab-list'),
   startIncorrectReview: document.getElementById('start-incorrect-review'),
   startWeakestReview: document.getElementById('start-weakest-review'),
   startUnmasteredReview: document.getElementById('start-unmastered-review'),
@@ -140,6 +195,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadArticles();
   loadWordBook();
   loadWordReviewSessions();
+  loadA2VocabProgress();
   updateBackupEnvironmentControls();
   try {
     if (typeof showSection === 'function') showSection('list');
@@ -210,6 +266,24 @@ function bindEvents() {
   }
   if (elements.wordbookStopReading) {
     elements.wordbookStopReading.addEventListener('click', stopWordListReading);
+  }
+  if (elements.a2VocabReviewAll) {
+    elements.a2VocabReviewAll.addEventListener('click', () => startA2VocabReview());
+  }
+  if (elements.a2VocabReviewUnmastered) {
+    elements.a2VocabReviewUnmastered.addEventListener('click', () => startA2VocabReview(null, { onlyUnmastered: true, limit: getA2ReviewCount() }));
+  }
+  if (elements.a2VocabReviewRandom) {
+    elements.a2VocabReviewRandom.addEventListener('click', () => startA2VocabReview(null, { onlyUnmastered: true, random: true, limit: getA2ReviewCount() }));
+  }
+  if (elements.a2VocabReadUnmastered) {
+    elements.a2VocabReadUnmastered.addEventListener('click', () => startA2VocabReading());
+  }
+  if (elements.a2VocabStopReading) {
+    elements.a2VocabStopReading.addEventListener('click', stopWordListReading);
+  }
+  if (elements.a2VocabList) {
+    elements.a2VocabList.addEventListener('click', handleA2VocabListClick);
   }
   if (elements.wordbookEditForm) {
     elements.wordbookEditForm.addEventListener('submit', handleWordBookEditSubmit);
@@ -523,6 +597,7 @@ function showSection(mode) {
   elements.reviewPanel.classList.toggle('hidden', mode !== 'review');
   elements.recitePanel.classList.toggle('hidden', mode !== 'recite');
   elements.wordbookPanel.classList.toggle('hidden', mode !== 'wordbook');
+  if (elements.a2VocabPanel) elements.a2VocabPanel.classList.toggle('hidden', mode !== 'a2vocab');
   elements.backupPanel.classList.toggle('hidden', mode !== 'backup');
   elements.reportPanel.classList.toggle('hidden', mode !== 'report');
   document.getElementById('article-list').classList.toggle('hidden', mode !== 'list');
@@ -533,6 +608,9 @@ function showSection(mode) {
   }
   if (mode === 'wordbook') {
     renderWordBookPage();
+  }
+  if (mode === 'a2vocab') {
+    renderA2VocabPage();
   }
   if (mode === 'recite') {
     showReciteList();
@@ -558,12 +636,14 @@ function handleEndReview() {
         completeReview({ manual: true });
         return;
       }
-      if (!confirm('当前错词复习还没有提交任何内容，确定要结束并回到错题本吗？')) {
+      const returnLabel = currentReview.returnPage === 'a2vocab' ? 'A2词汇' : '错题本';
+      if (!confirm(`当前词汇复习还没有提交任何内容，确定要结束并回到${returnLabel}吗？`)) {
         return;
       }
+      const returnPage = currentReview.returnPage || 'wordbook';
       stopReviewTimer();
       currentReview = null;
-      showSection('wordbook');
+      showSection(returnPage);
       return;
     }
     if (currentReview.doneIds && currentReview.doneIds.size > 0) {
@@ -644,6 +724,8 @@ function handlePageNav(event) {
     startReview(selectedArticleId);
   } else if (page === 'wordbook') {
     showSection('wordbook');
+  } else if (page === 'a2vocab') {
+    showSection('a2vocab');
   } else if (page === 'recite') {
     showSection('recite');
   } else if (page === 'report') {
@@ -706,6 +788,75 @@ function loadWordReviewSessions() {
 
 function saveWordReviewSessions() {
   localStorage.setItem(WORD_REVIEW_SESSIONS_KEY, JSON.stringify(normalizeWordReviewSessions(wordReviewSessions).slice(-120)));
+}
+
+function loadA2VocabProgress() {
+  const raw = localStorage.getItem(A2_VOCAB_PROGRESS_KEY);
+  try {
+    a2VocabProgress = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    a2VocabProgress = {};
+  }
+  if (!a2VocabProgress || typeof a2VocabProgress !== 'object' || Array.isArray(a2VocabProgress)) {
+    a2VocabProgress = {};
+  }
+}
+
+function saveA2VocabProgress() {
+  localStorage.setItem(A2_VOCAB_PROGRESS_KEY, JSON.stringify(a2VocabProgress));
+}
+
+function getA2VocabEntries() {
+  return A2_VOCABULARY.map(item => ({
+    ...item,
+    translation: safeString(a2VocabProgress[item.id]?.translation) || item.translation,
+    count: toNumber(a2VocabProgress[item.id]?.count, 0),
+    masteryScore: toNumber(a2VocabProgress[item.id]?.masteryScore, 0),
+    reviewCount: toNumber(a2VocabProgress[item.id]?.reviewCount, 0),
+    lastReviewed: safeString(a2VocabProgress[item.id]?.lastReviewed),
+    lastSeen: safeString(a2VocabProgress[item.id]?.lastSeen),
+    audioId: safeString(a2VocabProgress[item.id]?.audioId) || null,
+    audioName: safeString(a2VocabProgress[item.id]?.audioName),
+    history: Array.isArray(a2VocabProgress[item.id]?.history) ? a2VocabProgress[item.id].history : [],
+    fixed: true,
+    deck: 'a2vocab',
+  }));
+}
+
+function getA2VocabEntry(id) {
+  return getA2VocabEntries().find(item => String(item.id) === String(id));
+}
+
+function saveA2VocabEntryProgress(entry) {
+  if (!entry || !entry.id) return;
+  a2VocabProgress[entry.id] = {
+    translation: safeString(entry.translation),
+    count: toNumber(entry.count, 0),
+    masteryScore: toNumber(entry.masteryScore, 0),
+    reviewCount: toNumber(entry.reviewCount, 0),
+    lastReviewed: safeString(entry.lastReviewed),
+    lastSeen: safeString(entry.lastSeen),
+    audioId: safeString(entry.audioId) || null,
+    audioName: safeString(entry.audioName),
+    history: Array.isArray(entry.history) ? entry.history.slice(0, 30) : [],
+  };
+  saveA2VocabProgress();
+}
+
+function getWordDeckEntries(deck = 'wordbook') {
+  return deck === 'a2vocab' ? getA2VocabEntries() : wordBook;
+}
+
+function getWordDeckEntry(id, deck = 'wordbook') {
+  return getWordDeckEntries(deck).find(item => String(item.id) === String(id));
+}
+
+function saveWordDeckEntry(entry, deck = 'wordbook') {
+  if (deck === 'a2vocab') {
+    saveA2VocabEntryProgress(entry);
+    return;
+  }
+  saveWordBook();
 }
 
 function normalizeWordReviewSessions(sessions) {
@@ -1663,6 +1814,25 @@ function getAudioUrl(audioId) {
     const normalizedArticles = articles.map(normalizeArticleForBackup).filter(article => article.title);
     const normalizedWordBook = wordBook.map(normalizeWordBookEntryForBackup).filter(entry => entry.word);
     const normalizedWordReviewSessions = normalizeWordReviewSessions(wordReviewSessions);
+    const normalizedA2VocabProgress = Object.fromEntries(Object.entries(a2VocabProgress || {}).filter(([id]) => {
+      return A2_VOCABULARY.some(item => item.id === id);
+    }));
+    const a2Vocabulary = {
+      schemaVersion: A2_VOCAB_SCHEMA_VERSION,
+      source: 'Bijlage 3 Onregelmatige werkwoorden',
+      level: 'A2',
+      wordType: 'verb',
+      total: A2_VOCABULARY.length,
+      entries: A2_VOCABULARY.map(item => ({
+        id: item.id,
+        word: item.word,
+        translation: item.translation,
+        difficulty: item.difficulty,
+        source: item.source,
+        tags: item.tags,
+        wordType: item.wordType,
+      })),
+    };
     const portableRecitationSessions = getPortableRecitationSessions(normalizedArticles);
     return Object.assign({
       version: BACKUP_VERSION,
@@ -1673,6 +1843,8 @@ function getAudioUrl(audioId) {
         'recitationSessions',
         'wordBook',
         'wordReviewSessions',
+        'a2Vocabulary',
+        'a2VocabProgress',
         'reportData',
         'calendarSnapshots',
         'audioFiles',
@@ -1680,6 +1852,8 @@ function getAudioUrl(audioId) {
       articles: normalizedArticles,
       wordBook: normalizedWordBook,
       wordReviewSessions: normalizedWordReviewSessions,
+      a2Vocabulary,
+      a2VocabProgress: normalizedA2VocabProgress,
       recitationSessions: portableRecitationSessions,
       reportData: getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions),
       audioFiles: Array.isArray(options.audioFiles) ? options.audioFiles : [],
@@ -1713,7 +1887,7 @@ function getAudioUrl(audioId) {
         audioFiles,
       });
       downloadJson(payload, `dutch-dicta-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
-      elements.backupStatus.textContent = `备份已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录。`;
+      elements.backupStatus.textContent = `备份已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录、${payload.a2Vocabulary.total} 个A2动词与A2进度。`;
     } catch (error) {
       elements.backupStatus.textContent = `备份失败：${error.message}`;
     }
@@ -1813,9 +1987,10 @@ function getAudioUrl(audioId) {
       const text = await file.text();
       const data = JSON.parse(text);
       const result = await importBackup(data);
-      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词复习记录。`;
+      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词复习记录，${result.a2ProgressImportedCount} 个A2动词进度。`;
       renderArticleList();
       renderWordBookPage();
+      renderA2VocabPage();
       showReport();
       showSection('list');
     } catch (error) {
@@ -1847,9 +2022,10 @@ function getAudioUrl(audioId) {
         restoredAudioCount += 1;
       }
       const result = await importBackup(Object.assign({}, data, { audioFiles: [] }));
-      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词复习记录。`;
+      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词复习记录，${result.a2ProgressImportedCount} 个A2动词进度。`;
       renderArticleList();
       renderWordBookPage();
+      renderA2VocabPage();
       showReport();
       showSection('list');
     } catch (error) {
@@ -1962,14 +2138,39 @@ function getAudioUrl(audioId) {
       ...(Array.isArray(data.wordReviewSessions) ? data.wordReviewSessions : []),
     ]);
     const wordSessionImportedCount = Math.max(0, wordReviewSessions.length - wordSessionCountBefore);
+    let a2ProgressImportedCount = 0;
+    const importedA2Progress = data.a2VocabProgress && typeof data.a2VocabProgress === 'object' && !Array.isArray(data.a2VocabProgress)
+      ? data.a2VocabProgress
+      : {};
+    Object.entries(importedA2Progress).forEach(([id, progress]) => {
+      if (!A2_VOCABULARY.some(item => item.id === id)) return;
+      const existing = a2VocabProgress[id] || {};
+      const mergedHistory = [
+        ...(Array.isArray(existing.history) ? existing.history : []),
+        ...(Array.isArray(progress?.history) ? progress.history : []),
+      ].slice(0, 30);
+      a2VocabProgress[id] = {
+        translation: safeString(progress?.translation) || safeString(existing.translation),
+        count: Math.max(toNumber(existing.count, 0), toNumber(progress?.count, 0)),
+        masteryScore: Math.max(toNumber(existing.masteryScore, 0), toNumber(progress?.masteryScore, 0)),
+        reviewCount: Math.max(toNumber(existing.reviewCount, 0), toNumber(progress?.reviewCount, 0)),
+        lastReviewed: safeString(existing.lastReviewed) > safeString(progress?.lastReviewed) ? safeString(existing.lastReviewed) : safeString(progress?.lastReviewed),
+        lastSeen: safeString(existing.lastSeen) > safeString(progress?.lastSeen) ? safeString(existing.lastSeen) : safeString(progress?.lastSeen),
+        audioId: safeString(progress?.audioId) || safeString(existing.audioId) || null,
+        audioName: safeString(progress?.audioName) || safeString(existing.audioName),
+        history: mergedHistory,
+      };
+      a2ProgressImportedCount += 1;
+    });
     const recitationSessionCountAfter = articles.reduce((sum, article) => {
       return sum + normalizeRecitationSessions(article.recitationSessions).length;
     }, 0);
     const recitationSessionImportedCount = Math.max(0, recitationSessionCountAfter - recitationSessionCountBefore);
     saveWordReviewSessions();
     saveWordBook();
+    saveA2VocabProgress();
     saveArticles();
-    return { importedCount, overwrittenCount, wordImportedCount, wordOverwrittenCount, wordSessionImportedCount, recitationSessionImportedCount };
+    return { importedCount, overwrittenCount, wordImportedCount, wordOverwrittenCount, wordSessionImportedCount, recitationSessionImportedCount, a2ProgressImportedCount };
   }
 
   function sanitizeZipPath(value) {
@@ -2272,11 +2473,14 @@ async function renderReviewItem() {
     currentReview.autoAdvanceTimer = null;
   }
   if (currentReview.type === 'word') {
-    const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
+    const word = getWordDeckEntry(currentReview.wordIds[currentReview.index], currentReview.deck);
     if (!word) return;
     if (elements.reviewPanel) elements.reviewPanel.classList.add('word-review-mode');
-    elements.reviewTitle.textContent = '错词复习';
-    elements.reviewSubtitle.textContent = currentReview.onlyUnmastered ? '只复习未掌握错词' : '批量复习错题本';
+    const isA2Deck = currentReview.deck === 'a2vocab';
+    elements.reviewTitle.textContent = isA2Deck ? 'A2动词复习' : '错词复习';
+    elements.reviewSubtitle.textContent = isA2Deck
+      ? (currentReview.onlyUnmastered ? '只复习未掌握 A2 动词' : `内置 ${A2_VOCABULARY.length} 个 A2 不规则动词原形`)
+      : (currentReview.onlyUnmastered ? '只复习未掌握错词' : '批量复习错题本');
     elements.quizIndex.textContent = currentReview.index + 1;
     elements.quizTotal.textContent = currentReview.wordIds.length;
     updateReviewProgress(currentReview.index + 1, currentReview.wordIds.length);
@@ -2339,7 +2543,7 @@ async function renderReviewItem() {
 async function playCurrentSentenceAudio() {
   if (!currentReview) return;
   if (currentReview.type === 'word') {
-    const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
+    const word = getWordDeckEntry(currentReview.wordIds[currentReview.index], currentReview.deck);
     if (!word) return;
     if (word.audioId) {
       const audioUrl = await getAudioUrl(word.audioId);
@@ -2366,7 +2570,7 @@ async function playCurrentSentenceAudio() {
 function revealSentenceAnswer() {
   if (!currentReview) return;
   if (currentReview.type === 'word') {
-    const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
+    const word = getWordDeckEntry(currentReview.wordIds[currentReview.index], currentReview.deck);
     if (!word) return;
     const translationText = word.translation ? `\n中文：${word.translation}` : '';
     showFeedback(`正确文本：${word.word}${translationText}`, 'info');
@@ -2387,7 +2591,7 @@ function handleSubmitAnswer() {
   }
 
   if (currentReview.type === 'word') {
-    const word = wordBook.find(w => w.id === currentReview.wordIds[currentReview.index]);
+    const word = getWordDeckEntry(currentReview.wordIds[currentReview.index], currentReview.deck);
     if (!word) return;
     if (currentReview.doneIds.has(word.id)) return;
     const normalizedTarget = normalizeText(word.word);
@@ -2407,7 +2611,7 @@ function handleSubmitAnswer() {
       score,
       correctText: word.word,
     });
-    saveWordBook();
+    saveWordDeckEntry(word, currentReview.deck);
 
     currentReview.doneIds.add(word.id);
     currentReview.sessionScores.push({
@@ -2415,6 +2619,7 @@ function handleSubmitAnswer() {
       score,
       answer,
       correctText: word.word,
+      translation: word.translation || '',
     });
 
     showFeedback(`得分：${score}% 。已累计复习 ${word.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
@@ -2467,6 +2672,7 @@ function handleSubmitAnswer() {
     score,
     answer,
     correctText: sentence.text,
+    translation: sentence.translation || '',
   });
 
   showFeedback(`得分：${score}% 。已累计复习 ${sentence.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
@@ -3777,18 +3983,29 @@ function showReport() {
   }
 }
 
-function openWordBookEditPanel(id) {
-  const entry = wordBook.find(item => String(item.id) === String(id));
+function openWordBookEditPanel(id, deck = 'wordbook') {
+  const entry = getWordDeckEntry(id, deck);
   if (!entry || !elements.wordbookEditPanel) return;
+  if (elements.wordbookEditPanel.parentElement !== document.body) {
+    document.body.appendChild(elements.wordbookEditPanel);
+  }
   selectedWordBookId = String(entry.id);
+  selectedWordEditDeck = deck;
+  const isA2Deck = deck === 'a2vocab';
+  if (elements.wordbookEditTitle) elements.wordbookEditTitle.textContent = isA2Deck ? '编辑A2动词' : '编辑错词';
   elements.wordbookEditWord.value = entry.word;
   elements.wordbookEditTranslation.value = entry.translation || '';
   elements.wordbookEditDifficulty.value = entry.difficulty || '';
   elements.wordbookEditSource.value = entry.source || '';
+  elements.wordbookEditDifficulty.disabled = isA2Deck;
+  elements.wordbookEditSource.disabled = isA2Deck;
   if (elements.wordbookEditTags) {
     elements.wordbookEditTags.value = Array.isArray(entry.tags) ? entry.tags.join(', ') : '';
+    elements.wordbookEditTags.disabled = isA2Deck;
   }
   elements.wordbookEditAudioInfo.textContent = entry.audioName ? `当前音频：${entry.audioName}` : '当前无音频。';
+  const submitButton = elements.wordbookEditForm?.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.textContent = isA2Deck ? '保存A2动词' : '保存错词';
   elements.wordbookEditPanel.classList.remove('hidden');
   document.body.classList.add('modal-open');
   elements.wordbookEditTranslation?.focus();
@@ -3797,21 +4014,31 @@ function openWordBookEditPanel(id) {
 function closeWordBookEditPanel() {
   if (!elements.wordbookEditPanel) return;
   selectedWordBookId = null;
+  selectedWordEditDeck = 'wordbook';
   elements.wordbookEditPanel.classList.add('hidden');
   document.body.classList.remove('modal-open');
   if (elements.wordbookEditForm) elements.wordbookEditForm.reset();
+  if (elements.wordbookEditTitle) elements.wordbookEditTitle.textContent = '编辑错词';
+  if (elements.wordbookEditDifficulty) elements.wordbookEditDifficulty.disabled = false;
+  if (elements.wordbookEditSource) elements.wordbookEditSource.disabled = false;
+  if (elements.wordbookEditTags) elements.wordbookEditTags.disabled = false;
   if (elements.wordbookEditAudioInfo) elements.wordbookEditAudioInfo.textContent = '如果不修改音频则保持当前音频。';
+  const submitButton = elements.wordbookEditForm?.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.textContent = '保存错词';
 }
 
 async function handleWordBookEditSubmit(event) {
   event.preventDefault();
   if (!selectedWordBookId) return;
-  const entry = wordBook.find(item => String(item.id) === String(selectedWordBookId));
+  const deck = selectedWordEditDeck || 'wordbook';
+  const entry = getWordDeckEntry(selectedWordBookId, deck);
   if (!entry) return;
   entry.translation = elements.wordbookEditTranslation.value.trim();
-  entry.difficulty = elements.wordbookEditDifficulty.value.trim();
-  entry.source = elements.wordbookEditSource.value.trim();
-  if (elements.wordbookEditTags) {
+  if (deck !== 'a2vocab') {
+    entry.difficulty = elements.wordbookEditDifficulty.value.trim();
+    entry.source = elements.wordbookEditSource.value.trim();
+  }
+  if (elements.wordbookEditTags && deck !== 'a2vocab') {
     entry.tags = elements.wordbookEditTags.value
       .split(',')
       .map(tag => tag.trim())
@@ -3828,10 +4055,14 @@ async function handleWordBookEditSubmit(event) {
       return;
     }
   }
-  saveWordBook();
-  renderWordBookPage();
+  saveWordDeckEntry(entry, deck);
+  if (deck === 'a2vocab') {
+    renderA2VocabPage();
+  } else {
+    renderWordBookPage();
+  }
   closeWordBookEditPanel();
-  showFeedback('错词已更新。', 'success');
+  showFeedback(deck === 'a2vocab' ? 'A2动词已更新。' : '错词已更新。', 'success');
 }
 
 function deleteWordBookEntry(id) {
@@ -4085,6 +4316,97 @@ function renderWordBookCard(item, isMastered = false) {
   `;
 }
 
+function renderA2VocabPage() {
+  const entries = getA2VocabEntries();
+  const reviewed = entries.filter(item => toNumber(item.reviewCount, 0) > 0).length;
+  const pending = entries.filter(item => toNumber(item.masteryScore, 0) < 100).length;
+  const overallMastery = entries.length
+    ? Math.round(entries.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / entries.length)
+    : 0;
+
+  if (elements.a2VocabTotalWords) elements.a2VocabTotalWords.textContent = entries.length;
+  if (elements.a2VocabReviewedWords) elements.a2VocabReviewedWords.textContent = reviewed;
+  if (elements.a2VocabOverallMastery) elements.a2VocabOverallMastery.textContent = `${overallMastery}%`;
+  if (elements.a2VocabPendingReview) elements.a2VocabPendingReview.textContent = pending;
+  if (elements.a2VocabReviewAll) elements.a2VocabReviewAll.disabled = entries.length === 0;
+  if (elements.a2VocabReviewUnmastered) elements.a2VocabReviewUnmastered.disabled = pending === 0;
+  if (elements.a2VocabReadUnmastered) elements.a2VocabReadUnmastered.disabled = pending === 0;
+  if (elements.a2VocabStopReading && !wordReadingState.active) elements.a2VocabStopReading.disabled = true;
+
+  if (!elements.a2VocabList) return;
+  const activeWords = entries
+    .filter(item => toNumber(item.masteryScore, 0) < 100)
+    .sort((a, b) => toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0) || a.word.localeCompare(b.word, 'nl'));
+  const masteredWords = entries
+    .filter(item => toNumber(item.masteryScore, 0) >= 100)
+    .sort((a, b) => a.word.localeCompare(b.word, 'nl'));
+
+  elements.a2VocabList.innerHTML = `
+    <section class="wordbook-group wordbook-group-active">
+      <div class="wordbook-group-header">
+        <h4>待掌握 A2 词汇</h4>
+        <span>${activeWords.length} 个</span>
+      </div>
+      <div class="wordbook-group-grid">${activeWords.map(renderA2VocabCard).join('')}</div>
+    </section>
+    <section class="wordbook-group wordbook-group-mastered">
+      <div class="wordbook-group-header">
+        <h4>已掌握 A2 词汇</h4>
+        <span>${masteredWords.length} 个</span>
+      </div>
+      ${masteredWords.length
+        ? `<div class="wordbook-group-grid">${masteredWords.map(renderA2VocabCard).join('')}</div>`
+        : '<div class="empty-state">还没有 100% 熟练度的 A2 单词。</div>'}
+    </section>
+  `;
+}
+
+function renderA2VocabCard(item) {
+  const mastery = Math.round(toNumber(item.masteryScore, 0));
+  const mastered = mastery >= 100;
+  return `
+    <div class="wordbook-card ${mastered ? 'mastered compact' : 'active'}" data-word-id="${item.id}">
+      <div class="wordbook-card-header">
+        <div class="wordbook-word">${escapeHtml(item.word)}</div>
+        <div class="wordbook-mastery">${mastery}%</div>
+      </div>
+      ${mastered ? '' : `
+        <div class="wordbook-progress">
+          <div class="wordbook-progress-fill" style="width:${Math.min(100, mastery)}%"></div>
+        </div>
+      `}
+      <div class="wordbook-meta">标签：A2, 动词 · 复习：${toNumber(item.reviewCount, 0)} 次 · 错误：${toNumber(item.count, 0)} 次</div>
+      <div class="wordbook-translation">${escapeHtml(item.translation || '暂无说明')}</div>
+      <div class="wordbook-actions">
+        <button type="button" class="btn btn-small btn-secondary play-a2-word-btn icon-btn" aria-label="播放 ${escapeHtml(item.word)}" title="播放单词">▶</button>
+        <button type="button" class="btn btn-small btn-secondary edit-a2-word-btn">编辑</button>
+        <button type="button" class="btn btn-small btn-primary review-a2-word-btn">复习</button>
+      </div>
+    </div>
+  `;
+}
+
+function handleA2VocabListClick(event) {
+  const card = event.target.closest('.wordbook-card');
+  if (!card) return;
+  const id = card.dataset.wordId;
+  if (!id) return;
+  const entry = getA2VocabEntry(id);
+  if (!entry) return;
+
+  if (event.target.closest('.play-a2-word-btn')) {
+    playSingleWordEntry(entry);
+    return;
+  }
+  if (event.target.closest('.edit-a2-word-btn')) {
+    openWordBookEditPanel(id, 'a2vocab');
+    return;
+  }
+  if (event.target.closest('.review-a2-word-btn') || event.target.closest('.wordbook-card')) {
+    startA2VocabReview(id);
+  }
+}
+
 function handleWordbookListClick(event) {
   if (event.target.closest('.wordbook-archive-toggle-btn')) {
     masteredArchiveOpen = !masteredArchiveOpen;
@@ -4129,9 +4451,9 @@ function handleWordbookListClick(event) {
   }
 }
 
-function getWordsForReading(mode = 'unmastered') {
+function getWordsForReading(mode = 'unmastered', deck = 'wordbook') {
   const mastered = mode === 'mastered';
-  return wordBook
+  return getWordDeckEntries(deck)
     .filter(item => mastered ? toNumber(item.masteryScore, 0) >= 100 : toNumber(item.masteryScore, 0) < 100)
     .sort((a, b) => b.count - a.count || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0));
 }
@@ -4145,17 +4467,32 @@ function resetWordReadingPanel() {
   if (elements.wordbookReadingList) elements.wordbookReadingList.innerHTML = '';
 }
 
-function renderWordReadingList(words, mode = 'unmastered') {
-  if (!elements.wordbookReadingPanel || !elements.wordbookReadingList) return;
-  const title = mode === 'mastered' ? '已掌握归档朗读' : '未掌握单词朗读';
+function getReadingElements(deck = 'wordbook') {
+  if (deck === 'a2vocab') {
+    return {
+      panel: elements.a2VocabReadingPanel,
+      list: elements.a2VocabReadingList,
+    };
+  }
+  return {
+    panel: elements.wordbookReadingPanel,
+    list: elements.wordbookReadingList,
+  };
+}
+
+function renderWordReadingList(words, mode = 'unmastered', deck = 'wordbook') {
+  const reading = getReadingElements(deck);
+  if (!reading.panel || !reading.list) return;
+  const isA2Deck = deck === 'a2vocab';
+  const title = mode === 'mastered' ? '已掌握归档朗读' : (isA2Deck ? 'A2 未掌握词朗读' : '未掌握单词朗读');
   const note = mode === 'mastered'
     ? '归档单词会自动朗读 2 遍，当前朗读的单词会高亮。'
     : '每个单词自动朗读 2 遍，当前朗读的单词会高亮。';
-  const titleEl = elements.wordbookReadingPanel.querySelector('.wordbook-reading-header h3');
-  const noteEl = elements.wordbookReadingPanel.querySelector('.wordbook-reading-header p');
+  const titleEl = reading.panel.querySelector('.wordbook-reading-header h3');
+  const noteEl = reading.panel.querySelector('.wordbook-reading-header p');
   if (titleEl) titleEl.textContent = title;
   if (noteEl) noteEl.textContent = note;
-  elements.wordbookReadingList.innerHTML = words.map(item => `
+  reading.list.innerHTML = words.map(item => `
     <div class="wordbook-reading-item" data-read-word-id="${item.id}">
       <div>
         <strong>${escapeHtml(item.word)}</strong>
@@ -4164,7 +4501,7 @@ function renderWordReadingList(words, mode = 'unmastered') {
       <em>${Math.round(toNumber(item.masteryScore, 0))}%</em>
     </div>
   `).join('');
-  elements.wordbookReadingPanel.classList.remove('hidden');
+  reading.panel.classList.remove('hidden');
 }
 
 function setActiveReadingWord(id) {
@@ -4181,17 +4518,21 @@ function setActiveReadingWord(id) {
 
 async function startWordListReading(options = {}) {
   const mode = options.mode || 'unmastered';
-  const words = getWordsForReading(mode);
+  const deck = options.deck || 'wordbook';
+  const words = getWordsForReading(mode, deck);
   if (!words.length) {
     alert(mode === 'mastered' ? '当前没有已掌握的归档单词可播放。' : '当前没有未掌握的单词可播放。');
     return;
   }
   stopWordListReading({ keepPanel: true });
-  renderWordReadingList(words, mode);
+  renderWordReadingList(words, mode, deck);
   wordReadingState.active = true;
   wordReadingState.stopRequested = false;
+  wordReadingState.deck = deck;
   if (elements.wordbookReadUnmastered) elements.wordbookReadUnmastered.disabled = true;
+  if (elements.a2VocabReadUnmastered) elements.a2VocabReadUnmastered.disabled = true;
   if (elements.wordbookStopReading) elements.wordbookStopReading.disabled = false;
+  if (elements.a2VocabStopReading) elements.a2VocabStopReading.disabled = false;
 
   for (const word of words) {
     if (wordReadingState.stopRequested) break;
@@ -4204,6 +4545,10 @@ async function startWordListReading(options = {}) {
     showFeedback(mode === 'mastered' ? '已掌握归档列表播放完成。' : '未掌握单词列表播放完成。', 'success');
   }
   finishWordListReading();
+}
+
+function startA2VocabReading() {
+  startWordListReading({ deck: 'a2vocab' });
 }
 
 function stopWordListReading(options = {}) {
@@ -4228,7 +4573,11 @@ function finishWordListReading(options = {}) {
   if (elements.wordbookReadUnmastered) {
     elements.wordbookReadUnmastered.disabled = getUnmasteredWordsForReading().length === 0;
   }
+  if (elements.a2VocabReadUnmastered) {
+    elements.a2VocabReadUnmastered.disabled = getWordsForReading('unmastered', 'a2vocab').length === 0;
+  }
   if (elements.wordbookStopReading) elements.wordbookStopReading.disabled = true;
+  if (elements.a2VocabStopReading) elements.a2VocabStopReading.disabled = true;
 }
 
 async function playWordEntryTwice(entry) {
@@ -4309,19 +4658,25 @@ function speakWordText(text) {
 
 function startWordReview(wordId = null, options = {}) {
   stopWordListReading({ keepPanel: true, silent: true });
+  const deck = options.deck || 'wordbook';
+  const deckEntries = getWordDeckEntries(deck);
+  const sortedDeckEntries = deckEntries
+    .filter(item => !options.onlyUnmastered || toNumber(item.masteryScore, 0) < 100)
+    .sort((a, b) => (b.count || 0) - (a.count || 0) || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0));
+  const selectedEntries = options.random ? shuffleArray(sortedDeckEntries) : sortedDeckEntries;
+  const limitedEntries = options.limit ? selectedEntries.slice(0, Math.max(1, toNumber(options.limit, 20))) : selectedEntries;
   const ids = wordId
     ? [wordId]
-    : wordBook
-        .filter(item => !options.onlyUnmastered || toNumber(item.masteryScore, 0) < 100)
-        .sort((a, b) => (b.count || 0) - (a.count || 0) || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0))
-        .map(item => item.id);
+    : limitedEntries.map(item => item.id);
   if (!ids.length) {
-    alert(options.onlyUnmastered ? '当前没有未掌握的错词可复习。' : '错题本当前没有错词可复习。');
+    const emptyLabel = deck === 'a2vocab' ? 'A2词库' : '错题本';
+    alert(options.onlyUnmastered ? `当前没有未掌握的${emptyLabel}单词可复习。` : `${emptyLabel}当前没有单词可复习。`);
     return;
   }
   currentReview = {
     sessionId: generateId(),
     type: 'word',
+    deck,
     wordIds: ids,
     index: 0,
     doneIds: new Set(),
@@ -4330,12 +4685,33 @@ function startWordReview(wordId = null, options = {}) {
     onlyUnmastered: !!options.onlyUnmastered,
     waitingForManualSummary: false,
     autoAdvanceTimer: null,
-    returnPage: 'wordbook',
+    returnPage: deck === 'a2vocab' ? 'a2vocab' : 'wordbook',
   };
   if (elements.endReview) elements.endReview.textContent = '结束复习';
   startReviewTimer();
   showSection('review');
   renderReviewItem();
+}
+
+function startA2VocabReview(wordId = null, options = {}) {
+  startWordReview(wordId, { ...options, deck: 'a2vocab' });
+}
+
+function getA2ReviewCount() {
+  const value = toNumber(Number(elements.a2VocabReviewCount?.value), 20);
+  const max = A2_VOCABULARY.length;
+  const count = Math.max(1, Math.min(max, Math.round(value || 20)));
+  if (elements.a2VocabReviewCount) elements.a2VocabReviewCount.value = count;
+  return count;
+}
+
+function shuffleArray(items) {
+  const result = items.slice();
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
 }
 
 function resetWordBookEditForm() {
@@ -4368,6 +4744,7 @@ function completeReview(options = {}) {
   stopReviewTimer();
   const summary = {
     type: currentReview.type || 'sentence',
+    deck: currentReview.deck || '',
     total: currentReview.type === 'word' ? currentReview.wordIds.length : currentReview.sentenceIds.length,
     completedCount: currentReview.doneIds ? currentReview.doneIds.size : currentReview.sessionScores.length,
     isPartial: currentReview.doneIds ? currentReview.doneIds.size < (currentReview.type === 'word' ? currentReview.wordIds.length : currentReview.sentenceIds.length) : false,
@@ -4376,17 +4753,18 @@ function completeReview(options = {}) {
       score: item.score,
       answer: item.answer || '',
       correctText: item.correctText || item.sentence,
+      translation: item.translation || '',
     })),
     average: currentReview.sessionScores.length
       ? Math.round(currentReview.sessionScores.reduce((sum, item) => sum + item.score, 0) / currentReview.sessionScores.length)
       : 0,
-    wrongWords: wordBook.slice(0, 10),
+    wrongWords: currentReview.deck === 'a2vocab' ? [] : wordBook.slice(0, 10),
   };
   if (currentReview.startTime) {
     summary.duration = Date.now() - currentReview.startTime;
   }
 
-  if (currentReview.type === 'word' && currentReview.startTime && !currentReview.sessionRecorded) {
+  if (currentReview.type === 'word' && currentReview.deck !== 'a2vocab' && currentReview.startTime && !currentReview.sessionRecorded) {
     currentReview.sessionRecorded = true;
     const sessionId = currentReview.sessionId || `word-${currentReview.startTime}`;
     const alreadyRecorded = wordReviewSessions.some(session => session && session.sessionId === sessionId);
@@ -4441,7 +4819,7 @@ function completeReview(options = {}) {
 
   renderReviewSummary(summary);
   if (elements.endReview) elements.endReview.textContent = '关闭';
-  const returnLabel = currentReview.returnPage === 'wordbook' ? '错题本' : '首页';
+  const returnLabel = currentReview.returnPage === 'a2vocab' ? 'A2词汇' : (currentReview.returnPage === 'wordbook' ? '错题本' : '首页');
   showFeedback(`本次复习已完成，查看下方总结或点击“关闭”回到${returnLabel}。`, 'success');
 }
 
@@ -4461,6 +4839,7 @@ function renderReviewSummary(summary) {
   if (!elements.reviewSummary) return;
   const incorrectItems = summary.scores.filter(item => item.score < 90);
   const isWordReview = summary.type === 'word';
+  const isA2Review = summary.deck === 'a2vocab';
   const lines = summary.scores.map(item => `
     <div>
       <strong>【${item.score}%】</strong> ${escapeHtml(item.sentence)}
@@ -4479,18 +4858,26 @@ function renderReviewSummary(summary) {
               <div class="review-sentence-label">你的输入</div>
               <div class="review-sentence-text">${escapeHtml(item.answer || '（未填写）')}</div>
             </div>
+            ${item.translation ? `
+              <div class="review-sentence-row review-sentence-translation">
+                <div class="review-sentence-label">中文翻译</div>
+                <div class="review-sentence-text">${escapeHtml(item.translation)}</div>
+              </div>
+            ` : ''}
           </div>
         `).join('')}
       </div>`
     : '<div class="review-summary-note">本次没有低于 90 分的句子或词语。</div>';
-  const wordBookHtml = summary.wrongWords.length
+  const wordBookHtml = isA2Review
+    ? ''
+    : summary.wrongWords.length
     ? `<div class="review-word-book"><h4>近期错词</h4>${summary.wrongWords.slice(0, 5).map(item => `<div>${escapeHtml(item.word)} (${item.count})</div>`).join('')}</div>`
     : '<div class="empty-state">暂无错词。</div>';
 
   const durationText = summary.duration ? `本次用时：${formatDuration(summary.duration)}` : '';
   elements.reviewSummary.innerHTML = `
     <div class="review-summary-header">
-      <h3>${summary.isPartial ? '本轮复习总结' : (isWordReview ? '错词复习完成' : '复习完成')}</h3>
+      <h3>${summary.isPartial ? '本轮复习总结' : (isA2Review ? 'A2动词复习完成' : (isWordReview ? '错词复习完成' : '复习完成'))}</h3>
       <div class="review-summary-score">平均得分：${summary.average}%</div>
     </div>
     <div class="review-summary-body">
@@ -4567,6 +4954,12 @@ function renderSentenceMistakeSummary(sentence, article, wrongPairs, userAnswer 
           <div class="review-sentence-label">你的输入</div>
           <div class="review-sentence-text">${highlightedAnswer}</div>
         </div>
+        ${sentence.translation ? `
+          <div class="review-sentence-row review-sentence-translation">
+            <div class="review-sentence-label">中文翻译</div>
+            <div class="review-sentence-text">${escapeHtml(sentence.translation)}</div>
+          </div>
+        ` : ''}
       </div>
       ${mistakesHtml}
       <div class="review-summary-note">未点击“记录”的错词将不会入错题本。</div>

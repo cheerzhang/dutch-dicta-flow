@@ -201,6 +201,11 @@ button {
   content: "错";
 }
 
+.page-nav .nav-btn[data-page="a2vocab"]::before {
+  content: "A2";
+  font-size: 0.72rem;
+}
+
 .page-nav .nav-btn[data-page="report"]::before {
   content: "报";
 }
@@ -2246,7 +2251,8 @@ button {
   gap: 22px;
 }
 
-#wordbook-panel {
+#wordbook-panel,
+#a2-vocab-panel {
   overflow: hidden;
   padding: 0;
   border-color: rgba(191, 219, 254, 0.86);
@@ -2256,7 +2262,8 @@ button {
   box-shadow: 0 18px 48px rgba(30, 64, 175, 0.12);
 }
 
-#wordbook-panel > :not(.wordbook-hero) {
+#wordbook-panel > :not(.wordbook-hero),
+#a2-vocab-panel > :not(.wordbook-hero) {
   margin-left: 30px;
   margin-right: 30px;
 }
@@ -2320,6 +2327,13 @@ button {
   line-height: 1.7;
 }
 
+.a2-vocab-hero {
+  background:
+    radial-gradient(circle at 92% 10%, rgba(134, 239, 172, 0.42), transparent 28%),
+    radial-gradient(circle at 10% 8%, rgba(59, 130, 246, 0.42), transparent 35%),
+    linear-gradient(135deg, #102a43 0%, #2563eb 54%, #16a34a 100%);
+}
+
 .wordbook-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2352,6 +2366,29 @@ button {
     radial-gradient(circle at 98% 0%, rgba(56, 189, 248, 0.18), transparent 34%),
     linear-gradient(135deg, #eff6ff, #ffffff);
   box-shadow: 0 12px 30px rgba(30, 64, 175, 0.08);
+}
+
+.a2-review-count-control {
+  display: inline-grid;
+  grid-template-columns: auto 76px;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted-strong);
+  font-weight: 700;
+}
+
+.a2-review-count-control input {
+  width: 76px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  text-align: center;
 }
 
 .wordbook-calendar-panel {
@@ -3260,6 +3297,14 @@ body.modal-open {
   background: #edf8ff;
 }
 
+.review-sentence-translation {
+  background: #f8fafc;
+}
+
+.review-sentence-translation .review-sentence-text {
+  color: var(--muted-strong);
+}
+
 .highlight-error {
   padding: 2px 4px;
   border-radius: 4px;
@@ -3631,7 +3676,8 @@ body.modal-open {
     grid-template-columns: 1fr;
   }
 
-  #wordbook-panel > :not(.wordbook-hero) {
+  #wordbook-panel > :not(.wordbook-hero),
+  #a2-vocab-panel > :not(.wordbook-hero) {
     margin-left: 18px;
     margin-right: 18px;
   }

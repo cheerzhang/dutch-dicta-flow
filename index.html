@@ -26,6 +26,7 @@
         <button class="btn btn-secondary nav-btn" data-page="create">创建文章</button>
         <button class="btn btn-secondary nav-btn" data-page="recite">全文默写</button>
         <button class="btn btn-secondary nav-btn" data-page="wordbook">错题本</button>
+        <button class="btn btn-secondary nav-btn" data-page="a2vocab">A2动词</button>
         <button class="btn btn-secondary nav-btn" data-page="report">报告页面</button>
         <button class="btn btn-secondary nav-btn" data-page="backup">数据备份</button>
       </nav>
@@ -270,14 +271,68 @@
         </div>
       </section>
     </section>
+    <section class="card hidden" id="a2-vocab-panel">
+      <div class="wordbook-hero a2-vocab-hero">
+        <div class="wordbook-hero-copy">
+          <div class="wordbook-kicker">A2 Irregular Verb Deck</div>
+          <h2>A2动词</h2>
+          <p>固定内置不规则动词原形：不新增、不删除，专门用来朗读、连读和拼写复习。</p>
+        </div>
+        <div class="wordbook-metrics">
+          <div class="report-metric">
+              <h3>动词数</h3>
+            <div id="a2-vocab-total-words">0</div>
+          </div>
+          <div class="report-metric">
+            <h3>已复习</h3>
+            <div id="a2-vocab-reviewed-words">0</div>
+          </div>
+          <div class="report-metric">
+            <h3>总熟练度</h3>
+            <div id="a2-vocab-overall-mastery">0%</div>
+          </div>
+          <div class="report-metric">
+            <h3>待复习</h3>
+            <div id="a2-vocab-pending-review">0</div>
+          </div>
+        </div>
+      </div>
+      <div class="field-row wordbook-review-controls">
+        <button id="a2-vocab-review-all" class="btn btn-primary">批量复习A2动词</button>
+        <button id="a2-vocab-review-unmastered" class="btn btn-secondary">只复习未掌握单词</button>
+        <button id="a2-vocab-review-random" class="btn btn-secondary">随机复习未掌握</button>
+        <label class="a2-review-count-control">
+          <span>本次数量</span>
+          <input id="a2-vocab-review-count" type="number" min="1" max="121" value="20" inputmode="numeric" />
+        </label>
+        <button id="a2-vocab-read-unmastered" class="btn btn-secondary">列表播放未掌握单词</button>
+      </div>
+      <div id="a2-vocab-reading-panel" class="wordbook-reading-panel hidden">
+        <div class="wordbook-reading-header">
+          <div>
+            <h3>A2 未掌握词朗读</h3>
+            <p>每个单词自动朗读 2 遍，当前朗读的单词会高亮。</p>
+          </div>
+          <button id="a2-vocab-stop-reading" type="button" class="btn btn-small btn-secondary">结束阅读</button>
+        </div>
+        <div id="a2-vocab-reading-list" class="wordbook-reading-list"></div>
+      </div>
+      <div class="report-section">
+        <div class="report-section-header">
+          <h3>A2不规则动词原形</h3>
+          <p>词条带有 A2 和动词标签，分数和复习次数会保存在本地浏览器。</p>
+        </div>
+        <div id="a2-vocab-list" class="wordbook-list"></div>
+      </div>
+    </section>
     <section class="card hidden" id="backup-panel">
       <h2>数据备份与存储说明</h2>
-      <p>文章、句子、复习记录、全文默写记录和报告统计来源会保存在本地浏览器的 <strong>localStorage</strong> 中，句子音频文件保存在浏览器的 <strong>IndexedDB</strong> 中。刷新、关闭浏览器后数据仍会保留，但如果浏览器缓存被清除或换设备，数据会丢失。</p>
+      <p>文章、句子、复习记录、全文默写记录、A2动词进度和报告统计来源会保存在本地浏览器的 <strong>localStorage</strong> 中，句子与A2动词音频文件保存在浏览器的 <strong>IndexedDB</strong> 中。刷新、关闭浏览器后数据仍会保留，但如果浏览器缓存被清除或换设备，数据会丢失。</p>
       <div class="backup-mode-grid">
         <div class="backup-mode-card">
           <div class="backup-mode-header">
             <h3>快速备份</h3>
-            <p>适合你自己日常备份，导出一个 JSON 文件，包含文章、错题本、复习与全文默写记录。</p>
+            <p>适合你自己日常备份，导出一个 JSON 文件，包含文章、错题本、A2动词词表、A2进度、复习与全文默写记录。</p>
           </div>
           <button id="backup-export" class="btn btn-primary">快速导出 JSON</button>
           <div class="field-row">
@@ -293,7 +348,7 @@
         <div class="backup-mode-card">
           <div class="backup-mode-header">
             <h3>完整备份</h3>
-            <p>适合发给别人，导出 ZIP：里面包含 JSON、复习与全文默写记录，以及独立音频文件。</p>
+            <p>适合发给别人，导出 ZIP：里面包含 JSON、A2动词进度、复习与全文默写记录，以及独立音频文件。</p>
           </div>
           <button id="backup-export-zip" class="btn btn-secondary">完整导出 ZIP</button>
           <div class="field-row">
@@ -379,6 +434,6 @@
     </div>
   </template>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260615-a2-backup"></script>
 </body>
 </html>
