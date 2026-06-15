@@ -2368,7 +2368,8 @@ button {
   box-shadow: 0 12px 30px rgba(30, 64, 175, 0.08);
 }
 
-.a2-review-count-control {
+.a2-review-count-control,
+.wordbook-review-count-control {
   display: inline-grid;
   grid-template-columns: auto 76px;
   align-items: center;
@@ -2382,7 +2383,8 @@ button {
   font-weight: 700;
 }
 
-.a2-review-count-control input {
+.a2-review-count-control input,
+.wordbook-review-count-control input {
   width: 76px;
   min-height: 34px;
   padding: 6px 8px;
@@ -2756,6 +2758,105 @@ button {
   display: grid;
   gap: 8px;
   min-width: 104px;
+}
+
+.wordbook-stability-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #dbe7f5;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.wordbook-stability-bars {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.wordbook-stability-bar {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.wordbook-stability-bar-head {
+  display: grid;
+  gap: 2px;
+}
+
+.wordbook-stability-bar-head strong {
+  color: #0f172a;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.wordbook-stability-bar-head span,
+.wordbook-stability-bar em {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.wordbook-stability-bar-track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.wordbook-stability-bar-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+}
+
+.wordbook-stability-bar.solid .wordbook-stability-bar-track span {
+  background: #16a34a;
+}
+
+.wordbook-stability-bar.steady .wordbook-stability-bar-track span {
+  background: #2563eb;
+}
+
+.wordbook-stability-bar.review .wordbook-stability-bar-track span {
+  background: #d97706;
+}
+
+.wordbook-stability-bar.new .wordbook-stability-bar-track span {
+  background: #94a3b8;
+}
+
+.wordbook-stability-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wordbook-stability-summary div {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.wordbook-stability-summary strong {
+  color: #0f172a;
+  font-size: 1.22rem;
+}
+
+.wordbook-stability-summary span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
 }
 
 .wordbook-card,
@@ -3697,6 +3798,11 @@ body.modal-open {
   }
 
   .wordbook-archive-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .wordbook-stability-bars,
+  .wordbook-stability-summary {
     grid-template-columns: 1fr;
   }
 

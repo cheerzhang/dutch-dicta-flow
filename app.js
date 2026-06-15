@@ -869,6 +869,8 @@ function normalizeWordReviewSessions(sessions) {
       duration: toNumber(session?.duration, 0),
       averageScore: toNumber(session?.averageScore, 0),
       reviewedCount: toNumber(session?.reviewedCount, 0),
+      mode: safeString(session?.mode || 'review'),
+      deck: safeString(session?.deck || 'wordbook'),
     }))
     .filter(session => session.duration > 0 && !Number.isNaN(new Date(session.timestamp).getTime()))
     .filter(session => {
@@ -1842,6 +1844,7 @@ function getAudioUrl(audioId) {
         'articleReviewSessions',
         'recitationSessions',
         'wordBook',
+        'wordBookMasteryStats',
         'wordReviewSessions',
         'a2Vocabulary',
         'a2VocabProgress',
@@ -1851,6 +1854,7 @@ function getAudioUrl(audioId) {
       ],
       articles: normalizedArticles,
       wordBook: normalizedWordBook,
+      wordBookMasteryStats: getWordBookMasteryStats(normalizedWordBook),
       wordReviewSessions: normalizedWordReviewSessions,
       a2Vocabulary,
       a2VocabProgress: normalizedA2VocabProgress,
@@ -2478,9 +2482,9 @@ async function renderReviewItem() {
     if (elements.reviewPanel) elements.reviewPanel.classList.add('word-review-mode');
     const isA2Deck = currentReview.deck === 'a2vocab';
     elements.reviewTitle.textContent = isA2Deck ? 'A2动词复习' : '错词复习';
-    elements.reviewSubtitle.textContent = isA2Deck
+    elements.reviewSubtitle.textContent = currentReview.modeLabel || (isA2Deck
       ? (currentReview.onlyUnmastered ? '只复习未掌握 A2 动词' : `内置 ${A2_VOCABULARY.length} 个 A2 不规则动词原形`)
-      : (currentReview.onlyUnmastered ? '只复习未掌握错词' : '批量复习错题本');
+      : (currentReview.onlyMastered ? '随机抽查已掌握归档' : (currentReview.onlyUnmastered ? '只复习未掌握错词' : '批量复习错题本')));
     elements.quizIndex.textContent = currentReview.index + 1;
     elements.quizTotal.textContent = currentReview.wordIds.length;
     updateReviewProgress(currentReview.index + 1, currentReview.wordIds.length);
@@ -2603,7 +2607,12 @@ function handleSubmitAnswer() {
       word.count = (word.count || 0) + 1;
       word.lastSeen = new Date().toISOString();
     }
-    word.masteryScore = Math.min(100, Math.max(0, (word.masteryScore || 0) + score * 0.25));
+    const previousMastery = toNumber(word.masteryScore, 0);
+    if (currentReview.deck === 'wordbook' && currentReview.onlyMastered && score < 100) {
+      word.masteryScore = Math.max(0, Math.min(85, score));
+    } else {
+      word.masteryScore = Math.min(100, Math.max(0, previousMastery + score * 0.25));
+    }
     word.history = word.history || [];
     word.history.unshift({
       timestamp: new Date().toISOString(),
@@ -2622,7 +2631,11 @@ function handleSubmitAnswer() {
       translation: word.translation || '',
     });
 
-    showFeedback(`得分：${score}% 。已累计复习 ${word.reviewCount} 次。`, score >= 90 ? 'success' : 'warning');
+    const demoted = currentReview.deck === 'wordbook' && currentReview.onlyMastered && score < 100;
+    showFeedback(
+      demoted ? `得分：${score}% 。这个归档词已回到待掌握区。` : `得分：${score}% 。已累计复习 ${word.reviewCount} 次。`,
+      score >= 90 && !demoted ? 'success' : 'warning'
+    );
     elements.quizMastery.textContent = `${Math.round(word.masteryScore || 0)}%`;
     renderWordReviewResult(word, score, answer);
     elements.submitAnswer.disabled = true;
@@ -4136,6 +4149,11 @@ function renderWordBookPage() {
           <span><strong>${archivedRecent}</strong> 近 30 天错过</span>
         </div>
         <div class="wordbook-archive-actions">
+          <label class="wordbook-review-count-control">
+            <span>抽查数量</span>
+            <input class="wordbook-mastered-quiz-count" type="number" min="1" max="${Math.max(1, masteredWords.length)}" value="10" inputmode="numeric" ${masteredWords.length ? '' : 'disabled'} />
+          </label>
+          <button type="button" class="btn btn-small btn-primary wordbook-quiz-mastered-btn" ${masteredWords.length ? '' : 'disabled'}>随机抽查</button>
           <button type="button" class="btn btn-small btn-secondary wordbook-read-mastered-btn" ${masteredWords.length ? '' : 'disabled'}>列表播放</button>
           <button type="button" class="btn btn-small btn-secondary wordbook-archive-toggle-btn" ${masteredWords.length ? '' : 'disabled'}>${masteredArchiveOpen ? '收起归档' : '打开归档'}</button>
         </div>
@@ -4149,8 +4167,87 @@ function renderWordBookPage() {
   elements.wordbookList.innerHTML = `
     ${renderGroup('待掌握单词', activeWords.length, activeWords, 'active')}
     ${renderMasteredArchive()}
+    ${renderWordBookStabilityChart(sortedWords)}
   `;
 
+}
+
+function calculateWordStability(item) {
+  const mastery = Math.max(0, Math.min(100, toNumber(item.masteryScore, 0)));
+  const history = Array.isArray(item.history) ? item.history.slice(0, 12) : [];
+  const accuracy = history.length
+    ? Math.round(history.reduce((sum, entry) => sum + toNumber(entry.score, 0), 0) / history.length)
+    : mastery;
+  const reviewBonus = Math.min(100, toNumber(item.reviewCount, 0) * 12);
+  return Math.round((mastery * 0.58) + (accuracy * 0.3) + (reviewBonus * 0.12));
+}
+
+function getWordBookMasteryStats(words = wordBook) {
+  const buckets = [
+    { key: 'solid', label: '完全掌握', hint: '牢固度 88%+', count: 0 },
+    { key: 'steady', label: '基本掌握', hint: '68-87%', count: 0 },
+    { key: 'review', label: '需要复习', hint: '1-67%', count: 0 },
+    { key: 'new', label: '未开始', hint: '无复习记录', count: 0 },
+  ];
+  words.forEach(item => {
+    if (!toNumber(item.reviewCount, 0) && !(Array.isArray(item.history) && item.history.length)) {
+      buckets[3].count += 1;
+      return;
+    }
+    const score = calculateWordStability(item);
+    if (score >= 88) buckets[0].count += 1;
+    else if (score >= 68) buckets[1].count += 1;
+    else buckets[2].count += 1;
+  });
+  const total = words.length;
+  const masteredCount = buckets[0].count;
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    totalWords: total,
+    masteredCount,
+    masteredRate: total ? Math.round((masteredCount / total) * 100) : 0,
+    buckets,
+  };
+}
+
+function renderWordBookStabilityChart(words) {
+  if (!words.length) return '';
+  const stats = getWordBookMasteryStats(words);
+  const buckets = stats.buckets;
+  const maxCount = Math.max(1, ...buckets.map(bucket => bucket.count));
+  return `
+    <section class="wordbook-stability-panel">
+      <div class="wordbook-group-header">
+        <h4>掌握统计</h4>
+        <span>${stats.masteredCount} 个完全掌握</span>
+      </div>
+      <div class="wordbook-stability-bars">
+        ${buckets.map(bucket => `
+          <div class="wordbook-stability-bar ${bucket.key}">
+            <div class="wordbook-stability-bar-head">
+              <strong>${bucket.count}</strong>
+              <span>${bucket.label}</span>
+            </div>
+            <div class="wordbook-stability-bar-track" aria-label="${escapeHtml(bucket.label)} ${bucket.count} 个">
+              <span style="width:${Math.max(bucket.count ? 8 : 0, (bucket.count / maxCount) * 100)}%"></span>
+            </div>
+            <em>${bucket.hint}</em>
+          </div>
+        `).join('')}
+      </div>
+      <div class="wordbook-stability-summary">
+        <div>
+          <strong>${words.length}</strong>
+          <span>错词总数</span>
+        </div>
+        <div>
+          <strong>${stats.masteredRate}%</strong>
+          <span>完全掌握率</span>
+        </div>
+      </div>
+    </section>
+  `;
 }
 
 function getWordBookDailyActivity(year) {
@@ -4419,6 +4516,11 @@ function handleWordbookListClick(event) {
     return;
   }
 
+  if (event.target.closest('.wordbook-quiz-mastered-btn')) {
+    startMasteredWordBookQuiz();
+    return;
+  }
+
   const card = event.target.closest('.wordbook-card');
   if (!card) return;
   const id = card.dataset.wordId;
@@ -4449,6 +4551,29 @@ function handleWordbookListClick(event) {
     openWordBookEditPanel(id);
     return;
   }
+}
+
+function getMasteredWordBookQuizCount() {
+  const input = elements.wordbookList?.querySelector('.wordbook-mastered-quiz-count');
+  const masteredCount = wordBook.filter(item => toNumber(item.masteryScore, 0) >= 100).length;
+  const count = Math.max(1, Math.min(Math.max(1, masteredCount), Math.round(Number(input?.value) || 10)));
+  if (input) input.value = count;
+  return count;
+}
+
+function startMasteredWordBookQuiz() {
+  const masteredWords = wordBook.filter(item => toNumber(item.masteryScore, 0) >= 100);
+  if (!masteredWords.length) {
+    alert('当前还没有已掌握归档单词可抽查。');
+    return;
+  }
+  startWordReview(null, {
+    deck: 'wordbook',
+    onlyMastered: true,
+    random: true,
+    limit: getMasteredWordBookQuizCount(),
+    modeLabel: '随机抽查已掌握单词',
+  });
 }
 
 function getWordsForReading(mode = 'unmastered', deck = 'wordbook') {
@@ -4661,7 +4786,11 @@ function startWordReview(wordId = null, options = {}) {
   const deck = options.deck || 'wordbook';
   const deckEntries = getWordDeckEntries(deck);
   const sortedDeckEntries = deckEntries
-    .filter(item => !options.onlyUnmastered || toNumber(item.masteryScore, 0) < 100)
+    .filter(item => {
+      if (options.onlyMastered) return toNumber(item.masteryScore, 0) >= 100;
+      if (options.onlyUnmastered) return toNumber(item.masteryScore, 0) < 100;
+      return true;
+    })
     .sort((a, b) => (b.count || 0) - (a.count || 0) || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0));
   const selectedEntries = options.random ? shuffleArray(sortedDeckEntries) : sortedDeckEntries;
   const limitedEntries = options.limit ? selectedEntries.slice(0, Math.max(1, toNumber(options.limit, 20))) : selectedEntries;
@@ -4683,6 +4812,8 @@ function startWordReview(wordId = null, options = {}) {
     sessionScores: [],
     startTime: Date.now(),
     onlyUnmastered: !!options.onlyUnmastered,
+    onlyMastered: !!options.onlyMastered,
+    modeLabel: options.modeLabel || '',
     waitingForManualSummary: false,
     autoAdvanceTimer: null,
     returnPage: deck === 'a2vocab' ? 'a2vocab' : 'wordbook',
@@ -4775,6 +4906,8 @@ function completeReview(options = {}) {
         duration: summary.duration,
         averageScore: summary.average,
         reviewedCount: currentReview.doneIds.size,
+        mode: currentReview.onlyMastered ? 'masteredQuiz' : (currentReview.onlyUnmastered ? 'unmasteredReview' : 'review'),
+        deck: currentReview.deck || 'wordbook',
       });
       wordReviewSessions = normalizeWordReviewSessions(wordReviewSessions).slice(-120);
       saveWordReviewSessions();
