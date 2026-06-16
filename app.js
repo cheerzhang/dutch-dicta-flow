@@ -916,8 +916,8 @@ function handleArticleSubmit(event) {
 function normalizeWordToken(word) {
   return String(word)
     .toLowerCase()
-    .replace(/['’‘`´]/g, '')
-    .replace(/[^\p{L}\p{N}]/gu, '');
+    .replace(/[’‘`´]/g, "'")
+    .replace(/[^\p{L}\p{N}']/gu, '');
 }
 
 function tokenizeWordObjects(text) {
@@ -1819,6 +1819,7 @@ function getAudioUrl(audioId) {
     const normalizedA2VocabProgress = Object.fromEntries(Object.entries(a2VocabProgress || {}).filter(([id]) => {
       return A2_VOCABULARY.some(item => item.id === id);
     }));
+    const a2VocabEntriesWithProgress = getA2VocabEntries();
     const a2Vocabulary = {
       schemaVersion: A2_VOCAB_SCHEMA_VERSION,
       source: 'Bijlage 3 Onregelmatige werkwoorden',
@@ -1847,6 +1848,7 @@ function getAudioUrl(audioId) {
         'wordBookMasteryStats',
         'wordReviewSessions',
         'a2Vocabulary',
+        'a2VocabularyMasteryStats',
         'a2VocabProgress',
         'reportData',
         'calendarSnapshots',
@@ -1857,6 +1859,7 @@ function getAudioUrl(audioId) {
       wordBookMasteryStats: getWordBookMasteryStats(normalizedWordBook),
       wordReviewSessions: normalizedWordReviewSessions,
       a2Vocabulary,
+      a2VocabularyMasteryStats: getWordBookMasteryStats(a2VocabEntriesWithProgress),
       a2VocabProgress: normalizedA2VocabProgress,
       recitationSessions: portableRecitationSessions,
       reportData: getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions),
@@ -4211,15 +4214,17 @@ function getWordBookMasteryStats(words = wordBook) {
   };
 }
 
-function renderWordBookStabilityChart(words) {
+function renderWordBookStabilityChart(words, options = {}) {
   if (!words.length) return '';
   const stats = getWordBookMasteryStats(words);
   const buckets = stats.buckets;
   const maxCount = Math.max(1, ...buckets.map(bucket => bucket.count));
+  const title = options.title || '掌握统计';
+  const totalLabel = options.totalLabel || '错词总数';
   return `
     <section class="wordbook-stability-panel">
       <div class="wordbook-group-header">
-        <h4>掌握统计</h4>
+        <h4>${escapeHtml(title)}</h4>
         <span>${stats.masteredCount} 个完全掌握</span>
       </div>
       <div class="wordbook-stability-bars">
@@ -4239,7 +4244,7 @@ function renderWordBookStabilityChart(words) {
       <div class="wordbook-stability-summary">
         <div>
           <strong>${words.length}</strong>
-          <span>错词总数</span>
+          <span>${escapeHtml(totalLabel)}</span>
         </div>
         <div>
           <strong>${stats.masteredRate}%</strong>
@@ -4455,6 +4460,7 @@ function renderA2VocabPage() {
         ? `<div class="wordbook-group-grid">${masteredWords.map(renderA2VocabCard).join('')}</div>`
         : '<div class="empty-state">还没有 100% 熟练度的 A2 单词。</div>'}
     </section>
+    ${renderWordBookStabilityChart(entries, { title: 'A2掌握统计', totalLabel: 'A2动词总数' })}
   `;
 }
 
