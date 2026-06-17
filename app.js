@@ -52,6 +52,7 @@ let selectedArticleId = null;
 let selectedWordBookId = null;
 let selectedWordEditDeck = 'wordbook';
 let currentReview = null;
+let masteredArticlesOpen = false;
 let reviewAudio = new Audio();
 let reviewTimer = null;
 let recitationTimer = null;
@@ -921,7 +922,7 @@ function normalizeWordToken(word) {
 }
 
 function tokenizeWordObjects(text) {
-  const matches = String(text).match(/[\p{L}\p{N}]+(?:['’‘`´][\p{L}\p{N}]+)*/gu) || [];
+  const matches = String(text).match(/['’‘`´]?[\p{L}\p{N}]+(?:['’‘`´][\p{L}\p{N}]+)*/gu) || [];
   return matches
     .map(raw => ({ raw, normalized: normalizeWordToken(raw) }))
     .filter(item => item.normalized);
@@ -2706,23 +2707,25 @@ function renderWordReviewResult(word, score, userAnswer) {
   if (!elements.reviewSummary) return;
   
   elements.reviewSummary.innerHTML = `
-    <div class="review-summary-header">
+    <div class="review-summary-header word-result-header">
       <h3>拼写结果</h3>
       <div class="review-summary-score">得分：${score}%</div>
     </div>
-    <div class="review-summary-body">
-      <div class="review-sentence-compare">
-        <div class="review-sentence-row review-sentence-original">
+    <div class="review-summary-body word-result-body">
+      <div class="review-sentence-compare word-result-compare">
+        <div class="review-sentence-row review-sentence-original word-result-cell">
           <div class="review-sentence-label">正确拼法</div>
           <div class="review-sentence-text">${escapeHtml(word.word)}</div>
         </div>
-        <div class="review-sentence-row review-sentence-user">
+        <div class="review-sentence-row review-sentence-user word-result-cell">
           <div class="review-sentence-label">你的拼写</div>
           <div class="review-sentence-text">${escapeHtml(userAnswer)}</div>
         </div>
       </div>
-      ${word.translation ? `<div class="review-summary-note">中文：${escapeHtml(word.translation)}</div>` : ''}
-      <div class="review-summary-note">拼写记录已自动保存。</div>
+      <div class="word-result-notes">
+        ${word.translation ? `<div class="review-summary-note">中文：${escapeHtml(word.translation)}</div>` : ''}
+        <div class="review-summary-note">拼写记录已自动保存。</div>
+      </div>
     </div>
   `;
   elements.reviewSummary.classList.remove('hidden');
@@ -5031,32 +5034,32 @@ function renderReviewSummary(summary) {
 }
 
 function highlightSentenceDifferences(original, userInput, wrongPairs) {
-  const targetWords = tokenizeWords(original);
-  const answerWords = tokenizeWords(userInput);
+  const targetWords = tokenizeWordObjects(original);
+  const answerWords = tokenizeWordObjects(userInput);
   
   const wrongMap = new Map();
   wrongPairs.forEach(pair => {
-    wrongMap.set(pair.expected.toLowerCase(), pair.actual);
+    wrongMap.set(normalizeWordToken(pair.expected), pair.actual);
   });
   
   const highlightedOriginal = targetWords.map(word => {
-    if (wrongMap.has(word.toLowerCase())) {
-      return `<span class="highlight-error">${escapeHtml(word)}</span>`;
+    if (wrongMap.has(word.normalized)) {
+      return `<span class="highlight-error">${escapeHtml(word.raw)}</span>`;
     }
-    return escapeHtml(word);
+    return escapeHtml(word.raw);
   }).join(' ');
   
   const answerUsed = new Set();
   const highlightedAnswer = answerWords.map((word, idx) => {
     const found = wrongPairs.find(p => {
-      const match = p.actual === word && !answerUsed.has(word);
-      if (match) answerUsed.add(word);
+      const match = normalizeWordToken(p.actual) === word.normalized && !answerUsed.has(idx);
+      if (match) answerUsed.add(idx);
       return match;
     });
-    if (found || wrongPairs.some(p => p.actual === '（缺失）' && p.expected.toLowerCase() === word.toLowerCase())) {
-      return `<span class="highlight-error">${escapeHtml(word)}</span>`;
+    if (found || wrongPairs.some(p => p.actual === '（缺失）' && normalizeWordToken(p.expected) === word.normalized)) {
+      return `<span class="highlight-error">${escapeHtml(word.raw)}</span>`;
     }
-    return escapeHtml(word);
+    return escapeHtml(word.raw);
   }).join(' ');
   
   return { highlightedOriginal, highlightedAnswer };
@@ -5256,137 +5259,202 @@ function renderArticleList() {
   `;
   elements.articles.appendChild(summary);
 
-  listStats.forEach(({ article, stats }, index) => {
-    const card = document.createElement('div');
-    card.className = 'article-card';
-    card.style.setProperty('--mastery', `${Math.max(0, Math.min(100, stats.mastery))}%`);
-    card.style.setProperty('--card-delay', `${Math.min(index * 40, 280)}ms`);
+  const learningItems = listStats.filter(item => item.stats.mastery < 100);
+  const masteredItems = listStats.filter(item => item.stats.mastery >= 100);
+  elements.articles.appendChild(renderArticleGroup('学习中文章', learningItems, {
+    type: 'learning',
+    emptyText: '当前没有学习中的文章。',
+  }));
+  elements.articles.appendChild(renderArticleGroup('已学会文章', masteredItems, {
+    type: 'mastered',
+    note: '这些文章已经达到 100%，后续可以定期抽查复习。',
+    emptyText: '还没有达到 100% 完成度的文章。',
+  }));
+}
 
-    const titleWrap = document.createElement('div');
-    titleWrap.className = 'article-card-main';
-
-    const eyebrow = document.createElement('div');
-    eyebrow.className = 'article-card-eyebrow';
-    eyebrow.textContent = article.source || '来源未知';
-
-    const title = document.createElement('h3');
-    title.textContent = article.title;
-
-    const meta = document.createElement('div');
-    meta.className = 'article-card-meta';
-    meta.textContent = `${stats.sentenceCount} 个句子 · ${stats.sessionCount} 轮复习 · 最近平均 ${formatDuration(stats.avgTimeMs)}`;
-
-    const tags = document.createElement('div');
-    tags.className = 'article-card-tags';
-    const tagList = article.tags && article.tags.length ? article.tags : ['未标记'];
-    tagList.slice(0, 4).forEach(tag => {
-      const chip = document.createElement('span');
-      chip.textContent = tag;
-      tags.appendChild(chip);
-    });
-
-    const statLine = document.createElement('div');
-    statLine.className = 'article-card-stats';
-    [
-      ['今天', formatDuration(stats.todayMs)],
-      ['正确率', `${stats.accuracy}%`],
-      ['熟练度', `${stats.mastery}%`],
-    ].forEach(([label, value]) => {
-      const item = document.createElement('span');
-      item.innerHTML = `<small>${label}</small><strong>${value}</strong>`;
-      statLine.appendChild(item);
-    });
-
-    titleWrap.appendChild(eyebrow);
-    titleWrap.appendChild(title);
-    titleWrap.appendChild(meta);
-    titleWrap.appendChild(tags);
-    titleWrap.appendChild(statLine);
-
-    const mastery = document.createElement('div');
-    mastery.className = 'article-card-mastery';
-    mastery.innerHTML = `<strong>${stats.mastery}%</strong><span>Mastery</span>`;
-
-    const actions = document.createElement('div');
-    actions.className = 'article-card-actions';
-
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn btn-secondary btn-small';
-    editBtn.textContent = '编辑';
-    editBtn.addEventListener('click', () => openArticleDetail(article.id));
-
-    const reviewBtn = document.createElement('button');
-    reviewBtn.className = 'btn btn-primary article-review-button';
-    reviewBtn.textContent = '复习';
-    reviewBtn.addEventListener('click', () => startReview(article.id));
-
-    const weakestBtn = document.createElement('button');
-    weakestBtn.className = 'btn btn-secondary btn-small article-smart-review-button';
-    weakestBtn.textContent = '最弱 5 句';
-    weakestBtn.title = '复习当前文章里熟练度最低的最多 5 个未满分句子';
-    weakestBtn.addEventListener('click', () => startReview(article.id, null, { mode: 'weakest' }));
-
-    const unmasteredBtn = document.createElement('button');
-    unmasteredBtn.className = 'btn btn-secondary btn-small article-smart-review-button';
-    unmasteredBtn.textContent = '跳过满分';
-    unmasteredBtn.title = '复习未达到 100% 熟练度的句子';
-    unmasteredBtn.addEventListener('click', () => startReview(article.id, null, { mode: 'unmastered' }));
-
-    const playBtn = document.createElement('button');
-    playBtn.className = 'btn btn-secondary btn-small article-play-button';
-    playBtn.textContent = '连读';
-    playBtn.dataset.articleId = article.id;
-    playBtn.addEventListener('click', () => {
-      // toggle play for this article
-      if (playAllState.playing && !playAllState.loop) {
-        // currently playing a single run -> stop
-        playAllState.stopRequested = true;
-        stopPlayAll();
-        updateArticleListButtons(article.id, false, false);
-      } else if (playAllState.loop && playAllState.loopArticleId === article.id) {
-        // currently looping this article -> stop loop
-        stopLoopPlay(article.id);
-      } else {
-        // start single play
-        playAllSentences(article.id);
-        updateArticleListButtons(article.id, true, false);
-      }
-    });
-
-    const loopBtn = document.createElement('button');
-    loopBtn.className = 'btn btn-secondary btn-small article-loop-button';
-    loopBtn.textContent = '循环播放';
-    loopBtn.dataset.articleId = article.id;
-    loopBtn.addEventListener('click', () => {
-      if (playAllState.loop && playAllState.loopArticleId === article.id) {
-        stopLoopPlay(article.id);
-      } else {
-        startLoopPlay(article.id);
-      }
-    });
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn btn-danger btn-small';
-    delBtn.textContent = '删除';
-    delBtn.addEventListener('click', async () => {
-      if (!confirm(`确定删除文章 “${article.title}” 吗？此操作不能撤销。`)) return;
-      await deleteArticle(article.id);
-      renderArticleList();
-    });
-
-    actions.appendChild(reviewBtn);
-    actions.appendChild(weakestBtn);
-    actions.appendChild(unmasteredBtn);
-    actions.appendChild(editBtn);
-    actions.appendChild(playBtn);
-    actions.appendChild(loopBtn);
-    actions.appendChild(delBtn);
-
-    card.appendChild(titleWrap);
-    card.appendChild(mastery);
-    card.appendChild(actions);
-    elements.articles.appendChild(card);
+function renderArticleGroup(title, items, options = {}) {
+  const section = document.createElement('section');
+  const isMasteredGroup = options.type === 'mastered';
+  section.className = `article-library-group article-library-group-${options.type || 'default'} ${isMasteredGroup && masteredArticlesOpen ? 'open' : ''}`;
+  const totalSentences = items.reduce((sum, item) => sum + item.stats.sentenceCount, 0);
+  const totalSessions = items.reduce((sum, item) => sum + item.stats.sessionCount, 0);
+  const totalTodayMs = items.reduce((sum, item) => sum + item.stats.todayMs, 0);
+  section.innerHTML = `
+    <div class="article-library-group-header">
+      <div>
+        <h3>${escapeHtml(title)}</h3>
+        ${options.note ? `<p>${escapeHtml(options.note)}</p>` : ''}
+      </div>
+      <div class="article-library-group-actions">
+        <span>${items.length} 篇</span>
+        ${isMasteredGroup ? `<button type="button" class="btn btn-small btn-secondary article-mastered-toggle-btn" ${items.length ? '' : 'disabled'}>${masteredArticlesOpen ? '收起归档' : '打开归档'}</button>` : ''}
+      </div>
+    </div>
+  `;
+  if (isMasteredGroup) {
+    const stats = document.createElement('div');
+    stats.className = 'article-mastered-summary';
+    stats.innerHTML = `
+      <div><strong>${items.length}</strong><span>已学会文章</span></div>
+      <div><strong>${totalSentences}</strong><span>已掌握句子</span></div>
+      <div><strong>${totalSessions}</strong><span>复习轮数</span></div>
+      <div><strong>${formatDuration(totalTodayMs)}</strong><span>今日复习</span></div>
+    `;
+    section.appendChild(stats);
+    const toggleBtn = section.querySelector('.article-mastered-toggle-btn');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        masteredArticlesOpen = !masteredArticlesOpen;
+        renderArticleList();
+      });
+    }
+  }
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = options.emptyText || '暂无文章。';
+    section.appendChild(empty);
+    return section;
+  }
+  const grid = document.createElement('div');
+  grid.className = 'article-library-group-grid';
+  if (isMasteredGroup && !masteredArticlesOpen) {
+    grid.classList.add('hidden');
+  }
+  items.forEach((item, index) => {
+    grid.appendChild(renderArticleCard(item.article, item.stats, index, options.type === 'mastered'));
   });
+  section.appendChild(grid);
+  return section;
+}
+
+function renderArticleCard(article, stats, index = 0, isMastered = false) {
+  const card = document.createElement('div');
+  card.className = `article-card ${isMastered ? 'mastered' : ''}`;
+  card.style.setProperty('--mastery', `${Math.max(0, Math.min(100, stats.mastery))}%`);
+  card.style.setProperty('--card-delay', `${Math.min(index * 40, 280)}ms`);
+
+  const titleWrap = document.createElement('div');
+  titleWrap.className = 'article-card-main';
+
+  const eyebrow = document.createElement('div');
+  eyebrow.className = 'article-card-eyebrow';
+  eyebrow.textContent = article.source || '来源未知';
+
+  const title = document.createElement('h3');
+  title.textContent = article.title;
+
+  const meta = document.createElement('div');
+  meta.className = 'article-card-meta';
+  meta.textContent = `${stats.sentenceCount} 个句子 · ${stats.sessionCount} 轮复习 · 最近平均 ${formatDuration(stats.avgTimeMs)}`;
+
+  const tags = document.createElement('div');
+  tags.className = 'article-card-tags';
+  const tagList = article.tags && article.tags.length ? article.tags : ['未标记'];
+  tagList.slice(0, 4).forEach(tag => {
+    const chip = document.createElement('span');
+    chip.textContent = tag;
+    tags.appendChild(chip);
+  });
+
+  const statLine = document.createElement('div');
+  statLine.className = 'article-card-stats';
+  [
+    ['今天', formatDuration(stats.todayMs)],
+    ['正确率', `${stats.accuracy}%`],
+    ['熟练度', `${stats.mastery}%`],
+  ].forEach(([label, value]) => {
+    const item = document.createElement('span');
+    item.innerHTML = `<small>${label}</small><strong>${value}</strong>`;
+    statLine.appendChild(item);
+  });
+
+  titleWrap.appendChild(eyebrow);
+  titleWrap.appendChild(title);
+  titleWrap.appendChild(meta);
+  titleWrap.appendChild(tags);
+  titleWrap.appendChild(statLine);
+
+  const mastery = document.createElement('div');
+  mastery.className = 'article-card-mastery';
+  mastery.innerHTML = `<strong>${stats.mastery}%</strong><span>${isMastered ? 'Learned' : 'Mastery'}</span>`;
+
+  const actions = document.createElement('div');
+  actions.className = 'article-card-actions';
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'btn btn-secondary btn-small';
+  editBtn.textContent = '编辑';
+  editBtn.addEventListener('click', () => openArticleDetail(article.id));
+
+  const reviewBtn = document.createElement('button');
+  reviewBtn.className = 'btn btn-primary article-review-button';
+  reviewBtn.textContent = isMastered ? '定期复习' : '复习';
+  reviewBtn.addEventListener('click', () => startReview(article.id));
+
+  const weakestBtn = document.createElement('button');
+  weakestBtn.className = 'btn btn-secondary btn-small article-smart-review-button';
+  weakestBtn.textContent = '最弱 5 句';
+  weakestBtn.title = '复习当前文章里熟练度最低的最多 5 个未满分句子';
+  weakestBtn.addEventListener('click', () => startReview(article.id, null, { mode: 'weakest' }));
+
+  const unmasteredBtn = document.createElement('button');
+  unmasteredBtn.className = 'btn btn-secondary btn-small article-smart-review-button';
+  unmasteredBtn.textContent = '跳过满分';
+  unmasteredBtn.title = '复习未达到 100% 熟练度的句子';
+  unmasteredBtn.disabled = isMastered;
+  unmasteredBtn.addEventListener('click', () => startReview(article.id, null, { mode: 'unmastered' }));
+
+  const playBtn = document.createElement('button');
+  playBtn.className = 'btn btn-secondary btn-small article-play-button';
+  playBtn.textContent = '连读';
+  playBtn.dataset.articleId = article.id;
+  playBtn.addEventListener('click', () => {
+    if (playAllState.playing && !playAllState.loop) {
+      playAllState.stopRequested = true;
+      stopPlayAll();
+      updateArticleListButtons(article.id, false, false);
+    } else if (playAllState.loop && playAllState.loopArticleId === article.id) {
+      stopLoopPlay(article.id);
+    } else {
+      playAllSentences(article.id);
+      updateArticleListButtons(article.id, true, false);
+    }
+  });
+
+  const loopBtn = document.createElement('button');
+  loopBtn.className = 'btn btn-secondary btn-small article-loop-button';
+  loopBtn.textContent = '循环播放';
+  loopBtn.dataset.articleId = article.id;
+  loopBtn.addEventListener('click', () => {
+    if (playAllState.loop && playAllState.loopArticleId === article.id) {
+      stopLoopPlay(article.id);
+    } else {
+      startLoopPlay(article.id);
+    }
+  });
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'btn btn-danger btn-small';
+  delBtn.textContent = '删除';
+  delBtn.addEventListener('click', async () => {
+    if (!confirm(`确定删除文章 “${article.title}” 吗？此操作不能撤销。`)) return;
+    await deleteArticle(article.id);
+    renderArticleList();
+  });
+
+  actions.appendChild(reviewBtn);
+  actions.appendChild(weakestBtn);
+  actions.appendChild(unmasteredBtn);
+  actions.appendChild(editBtn);
+  actions.appendChild(playBtn);
+  actions.appendChild(loopBtn);
+  actions.appendChild(delBtn);
+
+  card.appendChild(titleWrap);
+  card.appendChild(mastery);
+  card.appendChild(actions);
+  return card;
 }
 
 async function deleteArticle(articleId) {

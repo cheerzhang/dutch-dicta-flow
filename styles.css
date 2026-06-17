@@ -678,11 +678,65 @@ button {
 }
 
 #review-panel.word-review-mode {
-  max-width: 760px;
+  max-width: 980px;
+  padding-bottom: 22px;
 }
 
 #review-panel.word-review-mode .review-card {
-  gap: 12px;
+  grid-template-columns: minmax(240px, 0.82fr) minmax(320px, 1.18fr);
+  grid-template-areas:
+    "prompt input"
+    "prompt actions"
+    "feedback feedback"
+    "summary summary";
+  align-items: stretch;
+  gap: 12px 14px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.08), transparent 32%),
+    linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+#review-panel.word-review-mode .detail-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  padding-top: 10px;
+}
+
+#review-panel.word-review-mode #review-title {
+  margin-bottom: 4px;
+  font-size: 1.28rem;
+}
+
+#review-panel.word-review-mode #review-subtitle {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+#review-panel.word-review-mode #end-review {
+  min-height: 40px;
+}
+
+#review-panel.word-review-mode .review-status {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+#review-panel.word-review-mode .review-status > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 0.88rem;
+}
+
+#review-panel.word-review-mode .review-status strong {
+  font-size: 1rem;
 }
 
 #review-panel .field-row {
@@ -961,12 +1015,32 @@ button {
 }
 
 #review-panel.word-review-mode .sentence-card {
-  padding: 20px 18px;
+  grid-area: prompt;
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  min-height: 230px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.12), transparent 45%),
+    #ffffff;
 }
 
 #review-panel.word-review-mode .sentence-card::before {
   content: "听词语或查看提示，然后直接输入拼写";
-  margin-bottom: 10px;
+  margin-bottom: 0;
+  font-size: 0.88rem;
+}
+
+#review-panel.word-review-mode .sentence-card .sentence-meta {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+#review-panel.word-review-mode .sentence-card .sentence-meta span {
+  justify-self: center;
+  max-width: 100%;
 }
 
 #review-panel .sentence-controls {
@@ -1006,7 +1080,7 @@ button {
 }
 
 #review-panel.word-review-mode #dictation-input {
-  min-height: 58px;
+  min-height: 64px;
   resize: none;
   font-size: 1.08rem;
   line-height: 1.35;
@@ -1014,14 +1088,105 @@ button {
 
 #review-panel.word-review-mode #submit-answer {
   min-height: 48px;
+  grid-column: auto;
 }
 
 #review-panel.word-review-mode .feedback {
-  margin-top: 6px;
+  grid-area: feedback;
+  margin-top: 0;
+  padding: 12px 14px;
 }
 
 #review-panel.word-review-mode .review-summary {
-  margin-top: 8px;
+  grid-area: summary;
+  margin-top: 0;
+  padding: 14px;
+}
+
+#review-panel.word-review-mode .field-row {
+  grid-area: input;
+  display: grid;
+  align-content: end;
+  gap: 8px;
+}
+
+#review-panel.word-review-mode .field-row label {
+  margin: 0;
+}
+
+#review-panel.word-review-mode .sentence-actions {
+  grid-area: actions;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+#review-panel.word-review-mode #next-sentence {
+  grid-column: auto;
+  grid-row: auto;
+  justify-self: stretch;
+}
+
+#review-panel.word-review-mode .review-summary-header {
+  margin-bottom: 8px;
+}
+
+#review-panel.word-review-mode .review-summary-score {
+  font-size: 1.12rem;
+}
+
+#review-panel.word-review-mode .word-result-header {
+  margin-bottom: 6px;
+}
+
+#review-panel.word-review-mode .word-result-header h3 {
+  font-size: 1rem;
+}
+
+#review-panel.word-review-mode .word-result-body {
+  gap: 8px;
+}
+
+#review-panel.word-review-mode .word-result-compare {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+#review-panel.word-review-mode .word-result-cell {
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+#review-panel.word-review-mode .word-result-cell .review-sentence-label {
+  margin-bottom: 2px;
+  font-size: 0.76rem;
+}
+
+#review-panel.word-review-mode .word-result-cell .review-sentence-text {
+  overflow-wrap: anywhere;
+  font-size: 1.08rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+#review-panel.word-review-mode .word-result-notes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+#review-panel.word-review-mode .word-result-notes .review-summary-note {
+  min-width: 0;
+  padding: 8px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84rem;
+}
+
+#review-panel.word-review-mode .review-summary-body,
+#review-panel.word-review-mode .review-sentence-compare,
+#review-panel.word-review-mode .review-summary-list {
+  gap: 8px;
 }
 
 #review-panel .sentence-actions {
@@ -1930,6 +2095,116 @@ button {
   gap: 16px;
 }
 
+.article-library-group {
+  display: grid;
+  gap: 12px;
+}
+
+.article-library-group-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 4px 2px;
+}
+
+.article-library-group-header h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+.article-library-group-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.article-library-group-header > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.article-library-group-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.article-library-group-actions > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.article-library-group-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.article-library-group-mastered {
+  padding: 18px;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(34, 197, 94, 0.1), transparent 30%),
+    linear-gradient(180deg, #f7fef9, #ffffff);
+}
+
+.article-library-group-mastered .article-library-group-header {
+  padding-top: 0;
+}
+
+.article-mastered-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.article-mastered-summary div {
+  display: grid;
+  gap: 3px;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.article-mastered-summary strong {
+  color: #166534;
+  font-size: 1.18rem;
+  line-height: 1;
+}
+
+.article-mastered-summary span {
+  color: #4b5563;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .article-list-hero {
   position: relative;
   display: grid;
@@ -2067,6 +2342,30 @@ button {
   border-color: #93c5fd;
   box-shadow: 0 20px 42px rgba(29, 78, 216, 0.16);
   transform: translateY(-2px);
+}
+
+.article-card.mastered {
+  border-color: #bbf7d0;
+  background:
+    linear-gradient(115deg, rgba(240, 253, 244, 0.95), rgba(255, 255, 255, 0.98) 48%, rgba(236, 253, 245, 0.94)),
+    #ffffff;
+}
+
+.article-card.mastered::before {
+  background: linear-gradient(180deg, #86efac, #22c55e 55%, #166534);
+}
+
+.article-card.mastered .article-card-eyebrow {
+  color: #15803d;
+  background: #dcfce7;
+}
+
+.article-card.mastered .article-card-mastery {
+  border-color: #bbf7d0;
+  color: #166534;
+  background:
+    conic-gradient(#22c55e var(--mastery), #dcfce7 0),
+    #ffffff;
 }
 
 .article-card-main {
@@ -3777,6 +4076,19 @@ body.modal-open {
     grid-template-columns: 1fr;
   }
 
+  .article-library-group-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .article-library-group-actions {
+    justify-content: flex-start;
+  }
+
+  .article-mastered-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   #wordbook-panel > :not(.wordbook-hero),
   #a2-vocab-panel > :not(.wordbook-hero) {
     margin-left: 18px;
@@ -3823,6 +4135,37 @@ body.modal-open {
   #review-panel .review-status,
   #review-panel .sentence-actions {
     grid-template-columns: 1fr;
+  }
+
+  #review-panel.word-review-mode .detail-header,
+  #review-panel.word-review-mode .review-status,
+  #review-panel.word-review-mode .review-card,
+  #review-panel.word-review-mode .sentence-actions {
+    grid-template-columns: 1fr;
+  }
+
+  #review-panel.word-review-mode .review-card {
+    grid-template-areas:
+      "prompt"
+      "input"
+      "actions"
+      "feedback"
+      "summary";
+    padding: 12px;
+  }
+
+  #review-panel.word-review-mode .sentence-card {
+    min-height: 0;
+    padding: 16px;
+  }
+
+  #review-panel.word-review-mode .word-result-compare,
+  #review-panel.word-review-mode .word-result-notes {
+    grid-template-columns: 1fr;
+  }
+
+  #review-panel.word-review-mode .word-result-notes .review-summary-note {
+    white-space: normal;
   }
 
   #next-sentence {
