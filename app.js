@@ -1369,6 +1369,39 @@ function getAudioUrl(audioId) {
     });
   }
 
+  function getArticleLibraryStatsSnapshot(normalizedArticles) {
+    const now = new Date();
+    const articleStats = normalizedArticles.map(article => {
+      const sentences = article.sentences || [];
+      const reviewSessions = normalizeReviewSessions(article.reviewSessions, article.id);
+      const reviewTimes = Array.isArray(article.reviewTimes) ? article.reviewTimes : [];
+      const todayMs = reviewSessions
+        .filter(session => isSameLocalDay(new Date(session.timestamp), now))
+        .reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+      return {
+        articleId: article.id,
+        title: article.title,
+        sentenceCount: sentences.length,
+        mastery: Math.round(toNumber(article.masteryScore, 0)),
+        sessionCount: Math.max(reviewTimes.length, reviewSessions.length),
+        todayMs,
+      };
+    });
+    const learnedArticles = articleStats.filter(item => item.mastery >= 100);
+    const learningArticles = articleStats.filter(item => item.mastery < 100);
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      totalArticles: articleStats.length,
+      learningArticles: learningArticles.length,
+      learnedArticles: learnedArticles.length,
+      learnedSentences: learnedArticles.reduce((sum, item) => sum + item.sentenceCount, 0),
+      learnedReviewSessions: learnedArticles.reduce((sum, item) => sum + item.sessionCount, 0),
+      learnedTodayMs: learnedArticles.reduce((sum, item) => sum + item.todayMs, 0),
+      learnedArticleIds: learnedArticles.map(item => item.articleId),
+    };
+  }
+
   function normalizePortableRecitationSessions(sessions) {
     if (!Array.isArray(sessions)) return [];
     return sessions
@@ -1843,6 +1876,7 @@ function getAudioUrl(audioId) {
       reportSchema: REPORT_SCHEMA_VERSION,
       dataKinds: [
         'articles',
+        'articleLibraryStats',
         'articleReviewSessions',
         'recitationSessions',
         'wordBook',
@@ -1856,6 +1890,7 @@ function getAudioUrl(audioId) {
         'audioFiles',
       ],
       articles: normalizedArticles,
+      articleLibraryStats: getArticleLibraryStatsSnapshot(normalizedArticles),
       wordBook: normalizedWordBook,
       wordBookMasteryStats: getWordBookMasteryStats(normalizedWordBook),
       wordReviewSessions: normalizedWordReviewSessions,
