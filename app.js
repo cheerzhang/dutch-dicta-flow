@@ -4,9 +4,10 @@ const WORD_REVIEW_SESSIONS_KEY = 'dutchDictaWordReviewSessions';
 const A2_VOCAB_PROGRESS_KEY = 'dutchDictaA2VocabProgress';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
-const BACKUP_VERSION = 8;
+const BACKUP_VERSION = 9;
 const REPORT_SCHEMA_VERSION = 6;
 const A2_VOCAB_SCHEMA_VERSION = 1;
+const A2_DEFAULT_REVIEW_COUNT = 20;
 
 const A2_VOCABULARY = [
   ['bakken', 'bake, fry'], ['bederven', 'spoil'], ['beginnen', 'begin, start'], ['begrijpen', 'understand'], ['bewegen', 'move'],
@@ -63,6 +64,7 @@ let wordReadingState = {
   currentAudio: null,
 };
 let masteredArchiveOpen = false;
+let a2MasteredArchiveOpen = false;
 let wordbookCalendarYear = new Date().getFullYear();
 
 const elements = {
@@ -152,7 +154,10 @@ const elements = {
   a2VocabPendingReview: document.getElementById('a2-vocab-pending-review'),
   a2VocabReviewAll: document.getElementById('a2-vocab-review-all'),
   a2VocabReviewUnmastered: document.getElementById('a2-vocab-review-unmastered'),
+  a2VocabReviewWeakest: document.getElementById('a2-vocab-review-weakest'),
+  a2VocabReviewRandomAll: document.getElementById('a2-vocab-review-random-all'),
   a2VocabReviewRandom: document.getElementById('a2-vocab-review-random'),
+  a2VocabReviewRandomWeakest: document.getElementById('a2-vocab-review-random-weakest'),
   a2VocabReviewCount: document.getElementById('a2-vocab-review-count'),
   a2VocabReadUnmastered: document.getElementById('a2-vocab-read-unmastered'),
   a2VocabStopReading: document.getElementById('a2-vocab-stop-reading'),
@@ -272,10 +277,50 @@ function bindEvents() {
     elements.a2VocabReviewAll.addEventListener('click', () => startA2VocabReview());
   }
   if (elements.a2VocabReviewUnmastered) {
-    elements.a2VocabReviewUnmastered.addEventListener('click', () => startA2VocabReview(null, { onlyUnmastered: true, limit: getA2ReviewCount() }));
+    elements.a2VocabReviewUnmastered.addEventListener('click', () => startA2VocabReview(null, {
+      onlyUnmastered: true,
+      limit: getA2ReviewCount(),
+      modeLabel: '只复习未掌握 A2 动词',
+    }));
+  }
+  if (elements.a2VocabReviewWeakest) {
+    elements.a2VocabReviewWeakest.addEventListener('click', () => startA2VocabReview(null, {
+      weakest: true,
+      limit: getA2ReviewCount(),
+      modeLabel: '复习最陌生 A2 动词',
+    }));
+  }
+  if (elements.a2VocabReviewRandomAll) {
+    elements.a2VocabReviewRandomAll.addEventListener('click', () => {
+      const count = getA2ReviewCount();
+      startA2VocabReview(null, {
+        random: true,
+        limit: count,
+        modeLabel: `随机复习 ${count} 个 A2 动词`,
+      });
+    });
   }
   if (elements.a2VocabReviewRandom) {
-    elements.a2VocabReviewRandom.addEventListener('click', () => startA2VocabReview(null, { onlyUnmastered: true, random: true, limit: getA2ReviewCount() }));
+    elements.a2VocabReviewRandom.addEventListener('click', () => {
+      const count = getA2ReviewCount();
+      startA2VocabReview(null, {
+        onlyUnmastered: true,
+        random: true,
+        limit: count,
+        modeLabel: `随机未掌握 ${count} 个 A2 动词`,
+      });
+    });
+  }
+  if (elements.a2VocabReviewRandomWeakest) {
+    elements.a2VocabReviewRandomWeakest.addEventListener('click', () => {
+      const count = getA2ReviewCount();
+      startA2VocabReview(null, {
+        weakest: true,
+        random: true,
+        limit: count,
+        modeLabel: `随机最陌生 ${count} 个 A2 动词`,
+      });
+    });
   }
   if (elements.a2VocabReadUnmastered) {
     elements.a2VocabReadUnmastered.addEventListener('click', () => startA2VocabReading());
@@ -871,7 +916,13 @@ function normalizeWordReviewSessions(sessions) {
       averageScore: toNumber(session?.averageScore, 0),
       reviewedCount: toNumber(session?.reviewedCount, 0),
       mode: safeString(session?.mode || 'review'),
+      modeLabel: safeString(session?.modeLabel),
       deck: safeString(session?.deck || 'wordbook'),
+      limit: toNumber(session?.limit, 0),
+      random: !!session?.random,
+      weakest: !!session?.weakest,
+      onlyUnmastered: !!session?.onlyUnmastered,
+      onlyMastered: !!session?.onlyMastered,
     }))
     .filter(session => session.duration > 0 && !Number.isNaN(new Date(session.timestamp).getTime()))
     .filter(session => {
@@ -880,6 +931,10 @@ function normalizeWordReviewSessions(sessions) {
       seen.add(key);
       return true;
     });
+}
+
+function getWordBookReviewSessions(sessions = wordReviewSessions) {
+  return normalizeWordReviewSessions(sessions).filter(session => (session.deck || 'wordbook') === 'wordbook');
 }
 
 function handleArticleSubmit(event) {
@@ -1419,6 +1474,7 @@ function getAudioUrl(audioId) {
   }
 
   function getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions) {
+    const wordBookReviewSessions = getWordBookReviewSessions(normalizedWordReviewSessions);
     const now = new Date();
     const oneDayMs = 24 * 60 * 60 * 1000;
     const dateKey = date => getLocalDateKey(date);
@@ -1452,7 +1508,7 @@ function getAudioUrl(audioId) {
       });
     });
 
-    const wordSessions = normalizedWordReviewSessions.map(session => ({
+    const wordSessions = wordBookReviewSessions.map(session => ({
       ...session,
       type: 'word',
       title: '单词复习',
@@ -1649,7 +1705,7 @@ function getAudioUrl(audioId) {
         return activity.get(key);
       };
       const sessionDates = new Set();
-      normalizedWordReviewSessions.forEach(session => {
+      wordBookReviewSessions.forEach(session => {
         const date = new Date(session.timestamp);
         if (Number.isNaN(date.getTime()) || date.getFullYear() !== year) return;
         const key = dateKey(date);
@@ -1720,7 +1776,7 @@ function getAudioUrl(audioId) {
       .concat(calendarYear)))
       .sort((a, b) => a - b);
     const wordBookCalendarYears = Array.from(new Set([
-      ...normalizedWordReviewSessions
+      ...wordBookReviewSessions
         .map(session => new Date(session.timestamp))
         .filter(date => !Number.isNaN(date.getTime()))
         .map(date => date.getFullYear()),
@@ -1731,7 +1787,7 @@ function getAudioUrl(audioId) {
       calendarYear,
     ])).sort((a, b) => a - b);
 
-    const reviewedUnits = Math.max(1, sentenceHistory.length + normalizedWordReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
+    const reviewedUnits = Math.max(1, sentenceHistory.length + wordBookReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
     const avgMsPerUnit = Math.min(180000, Math.max(20000, Math.round(totalDuration / reviewedUnits) || 60000));
     const avgDailyMs7 = Math.round(study7Ms / 7);
     const avgActiveDayMs7 = activeDays7 ? Math.round(study7Ms / activeDays7) : 0;
@@ -1841,7 +1897,7 @@ function getAudioUrl(audioId) {
         sentences: totalSentences,
         articleReviewSessions: articleReviewSessions.length,
         recitationSessions: portableRecitationSessions.length,
-        wordReviewSessions: normalizedWordReviewSessions.length,
+        wordReviewSessions: wordBookReviewSessions.length,
       },
     };
   }
@@ -1870,6 +1926,25 @@ function getAudioUrl(audioId) {
         wordType: item.wordType,
       })),
     };
+    const a2VocabularyReviewSettings = {
+      defaultReviewCount: A2_DEFAULT_REVIEW_COUNT,
+      countInputMax: A2_VOCABULARY.length,
+      availableModes: [
+        { mode: 'review', label: '全部批量复习', random: false, weakest: false, onlyUnmastered: false },
+        { mode: 'unmasteredReview', label: '只复习未掌握', random: false, weakest: false, onlyUnmastered: true },
+        { mode: 'weakestReview', label: '复习最陌生', random: false, weakest: true, onlyUnmastered: false },
+        { mode: 'randomReview', label: '随机复习', random: true, weakest: false, onlyUnmastered: false },
+        { mode: 'randomUnmasteredReview', label: '随机未掌握', random: true, weakest: false, onlyUnmastered: true },
+        { mode: 'randomWeakestReview', label: '随机最陌生', random: true, weakest: true, onlyUnmastered: false },
+      ],
+      weakestSort: ['masteryScore:asc', 'reviewCount:asc', 'count:desc', 'word:asc'],
+      randomWeakestPoolMultiplier: 2,
+      masteredReading: {
+        repetitionsPerWord: 2,
+        sortBy: 'word',
+        inlineHighlight: true,
+      },
+    };
     const portableRecitationSessions = getPortableRecitationSessions(normalizedArticles);
     return Object.assign({
       version: BACKUP_VERSION,
@@ -1883,6 +1958,7 @@ function getAudioUrl(audioId) {
         'wordBookMasteryStats',
         'wordReviewSessions',
         'a2Vocabulary',
+        'a2VocabularyReviewSettings',
         'a2VocabularyMasteryStats',
         'a2VocabProgress',
         'reportData',
@@ -1895,6 +1971,7 @@ function getAudioUrl(audioId) {
       wordBookMasteryStats: getWordBookMasteryStats(normalizedWordBook),
       wordReviewSessions: normalizedWordReviewSessions,
       a2Vocabulary,
+      a2VocabularyReviewSettings,
       a2VocabularyMasteryStats: getWordBookMasteryStats(a2VocabEntriesWithProgress),
       a2VocabProgress: normalizedA2VocabProgress,
       recitationSessions: portableRecitationSessions,
@@ -1929,8 +2006,9 @@ function getAudioUrl(audioId) {
       const payload = buildBackupPayload({
         audioFiles,
       });
+      const a2SessionCount = payload.wordReviewSessions.filter(session => session.deck === 'a2vocab').length;
       downloadJson(payload, `dutch-dicta-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
-      elements.backupStatus.textContent = `备份已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录、${payload.a2Vocabulary.total} 个A2动词与A2进度。`;
+      elements.backupStatus.textContent = `备份已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录（含 ${a2SessionCount} 条A2记录）、${payload.a2Vocabulary.total} 个A2动词与A2批量复习格式。`;
     } catch (error) {
       elements.backupStatus.textContent = `备份失败：${error.message}`;
     }
@@ -1953,6 +2031,7 @@ function getAudioUrl(audioId) {
         packageType: 'zip',
         audioFiles,
       });
+      const a2SessionCount = payload.wordReviewSessions.filter(session => session.deck === 'a2vocab').length;
       const files = [
         {
           name: 'backup.json',
@@ -1965,7 +2044,7 @@ function getAudioUrl(audioId) {
       }
       const zipBlob = createZipBlob(files);
       downloadBlob(zipBlob, `dutch-dicta-complete-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`);
-      elements.backupStatus.textContent = `完整备份 ZIP 已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${audioFiles.length} 个音频文件。`;
+      elements.backupStatus.textContent = `完整备份 ZIP 已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录（含 ${a2SessionCount} 条A2记录）、${audioFiles.length} 个音频文件。`;
     } catch (error) {
       elements.backupStatus.textContent = `完整备份失败：${error.message}`;
     }
@@ -2030,7 +2109,7 @@ function getAudioUrl(audioId) {
       const text = await file.text();
       const data = JSON.parse(text);
       const result = await importBackup(data);
-      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词复习记录，${result.a2ProgressImportedCount} 个A2动词进度。`;
+      elements.backupStatus.textContent = `备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词/A2复习记录，${result.a2ProgressImportedCount} 个A2动词进度。`;
       renderArticleList();
       renderWordBookPage();
       renderA2VocabPage();
@@ -2065,7 +2144,7 @@ function getAudioUrl(audioId) {
         restoredAudioCount += 1;
       }
       const result = await importBackup(Object.assign({}, data, { audioFiles: [] }));
-      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词复习记录，${result.a2ProgressImportedCount} 个A2动词进度。`;
+      elements.backupStatus.textContent = `完整备份已导入：新增 ${result.importedCount} 篇文章，覆盖 ${result.overwrittenCount} 篇文章；新增 ${result.wordImportedCount} 个错词，覆盖 ${result.wordOverwrittenCount} 个错词；恢复 ${restoredAudioCount} 个音频；恢复 ${result.recitationSessionImportedCount} 条全文默写记录，${result.wordSessionImportedCount} 条单词/A2复习记录，${result.a2ProgressImportedCount} 个A2动词进度。`;
       renderArticleList();
       renderWordBookPage();
       renderA2VocabPage();
@@ -3264,7 +3343,8 @@ function showReport() {
         articleId: article.id,
       })));
     });
-    const timedWordSessions = normalizeWordReviewSessions(wordReviewSessions).map(session => ({
+    const wordBookReviewSessions = getWordBookReviewSessions();
+    const timedWordSessions = wordBookReviewSessions.map(session => ({
       ...session,
       type: 'word',
       title: '单词复习',
@@ -3419,7 +3499,7 @@ function showReport() {
       }))
       .filter(item => item.ms > 0)
       .sort((a, b) => b.ms - a.ms);
-    const wordReviewSessionsToday = normalizeWordReviewSessions(wordReviewSessions)
+    const wordReviewSessionsToday = wordBookReviewSessions
       .filter(session => isSameDay(new Date(session.timestamp), now));
     const wordTodayMs = wordReviewSessionsToday.reduce((sum, session) => sum + session.duration, 0);
     const todayReviewDistribution = [
@@ -3603,7 +3683,7 @@ function showReport() {
     const activeDays7 = new Set(sessionsLast7.map(session => dateKey(new Date(session.timestamp)))).size;
     const avgDailyMs7 = Math.round(study7Ms / 7);
     const avgActiveDayMs7 = activeDays7 ? Math.round(study7Ms / activeDays7) : 0;
-    const reviewedUnits = Math.max(1, reviewedCount + wordReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
+    const reviewedUnits = Math.max(1, reviewedCount + wordBookReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
     const avgMsPerUnit = Math.min(180000, Math.max(20000, Math.round(totalDurationsMs / reviewedUnits) || 60000));
     const recitationNeedsPractice = recitationArticleStats.filter(item => item.averageScore < 90).length;
     const remainingUnits = pendingSentences + activeMistakeWords + recitationNeedsPractice;
@@ -4310,7 +4390,7 @@ function getWordBookDailyActivity(year) {
   };
   const sessionDates = new Set();
 
-  normalizeWordReviewSessions(wordReviewSessions).forEach(session => {
+  getWordBookReviewSessions().forEach(session => {
     const date = new Date(session.timestamp);
     if (Number.isNaN(date.getTime()) || date.getFullYear() !== year) return;
     const key = getLocalDateKey(date);
@@ -4480,6 +4560,11 @@ function renderA2VocabPage() {
   const masteredWords = entries
     .filter(item => toNumber(item.masteryScore, 0) >= 100)
     .sort((a, b) => a.word.localeCompare(b.word, 'nl'));
+  const masteredWithAudio = masteredWords.filter(item => item.audioId).length;
+  const masteredReviewCount = masteredWords.reduce((sum, item) => sum + toNumber(item.reviewCount, 0), 0);
+  const masteredAverage = masteredWords.length
+    ? Math.round(masteredWords.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / masteredWords.length)
+    : 0;
 
   elements.a2VocabList.innerHTML = `
     <section class="wordbook-group wordbook-group-active">
@@ -4489,14 +4574,27 @@ function renderA2VocabPage() {
       </div>
       <div class="wordbook-group-grid">${activeWords.map(renderA2VocabCard).join('')}</div>
     </section>
-    <section class="wordbook-group wordbook-group-mastered">
-      <div class="wordbook-group-header">
-        <h4>已掌握 A2 词汇</h4>
-        <span>${masteredWords.length} 个</span>
+    <section class="wordbook-group wordbook-group-mastered wordbook-archive a2-mastered-archive ${a2MasteredArchiveOpen ? 'open' : ''}">
+      <div class="wordbook-archive-summary">
+        <div>
+          <div class="wordbook-archive-kicker">A2 Mastered Verbs</div>
+          <h4>已掌握 A2 动词</h4>
+          <p>默认收起，只保留掌握概览；可以展开查看词卡，或直接遍历朗读已掌握单词。</p>
+        </div>
+        <div class="wordbook-archive-stats">
+          <span><strong>${masteredWords.length}</strong> 已掌握</span>
+          <span><strong>${masteredWithAudio}</strong> 有音频</span>
+          <span><strong>${masteredAverage}%</strong> 平均熟练度</span>
+          <span><strong>${masteredReviewCount}</strong> 复习次数</span>
+        </div>
+        <div class="wordbook-archive-actions">
+          <button type="button" class="btn btn-small btn-primary a2-read-mastered-btn" ${masteredWords.length ? '' : 'disabled'}>朗读已掌握</button>
+          <button type="button" class="btn btn-small btn-secondary a2-archive-toggle-btn" ${masteredWords.length ? '' : 'disabled'}>${a2MasteredArchiveOpen ? '收起归档' : '打开归档'}</button>
+        </div>
       </div>
-      ${masteredWords.length
+      ${a2MasteredArchiveOpen && masteredWords.length
         ? `<div class="wordbook-group-grid">${masteredWords.map(renderA2VocabCard).join('')}</div>`
-        : '<div class="empty-state">还没有 100% 熟练度的 A2 单词。</div>'}
+        : (!masteredWords.length ? '<div class="empty-state">还没有 100% 熟练度的 A2 单词。</div>' : '')}
     </section>
     ${renderWordBookStabilityChart(entries, { title: 'A2掌握统计', totalLabel: 'A2动词总数' })}
   `;
@@ -4521,13 +4619,27 @@ function renderA2VocabCard(item) {
       <div class="wordbook-actions">
         <button type="button" class="btn btn-small btn-secondary play-a2-word-btn icon-btn" aria-label="播放 ${escapeHtml(item.word)}" title="播放单词">▶</button>
         <button type="button" class="btn btn-small btn-secondary edit-a2-word-btn">编辑</button>
-        <button type="button" class="btn btn-small btn-primary review-a2-word-btn">复习</button>
       </div>
     </div>
   `;
 }
 
 function handleA2VocabListClick(event) {
+  if (event.target.closest('.a2-archive-toggle-btn')) {
+    a2MasteredArchiveOpen = !a2MasteredArchiveOpen;
+    renderA2VocabPage();
+    return;
+  }
+
+  if (event.target.closest('.a2-read-mastered-btn')) {
+    if (!a2MasteredArchiveOpen) {
+      a2MasteredArchiveOpen = true;
+      renderA2VocabPage();
+    }
+    startWordListReading({ deck: 'a2vocab', mode: 'mastered', sortBy: 'word', inlineOnly: true });
+    return;
+  }
+
   const card = event.target.closest('.wordbook-card');
   if (!card) return;
   const id = card.dataset.wordId;
@@ -4541,10 +4653,6 @@ function handleA2VocabListClick(event) {
   }
   if (event.target.closest('.edit-a2-word-btn')) {
     openWordBookEditPanel(id, 'a2vocab');
-    return;
-  }
-  if (event.target.closest('.review-a2-word-btn') || event.target.closest('.wordbook-card')) {
-    startA2VocabReview(id);
   }
 }
 
@@ -4620,11 +4728,16 @@ function startMasteredWordBookQuiz() {
   });
 }
 
-function getWordsForReading(mode = 'unmastered', deck = 'wordbook') {
+function getWordsForReading(mode = 'unmastered', deck = 'wordbook', options = {}) {
   const mastered = mode === 'mastered';
   return getWordDeckEntries(deck)
     .filter(item => mastered ? toNumber(item.masteryScore, 0) >= 100 : toNumber(item.masteryScore, 0) < 100)
-    .sort((a, b) => b.count - a.count || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0));
+    .sort((a, b) => {
+      if (options.sortBy === 'word') {
+        return String(a.word).localeCompare(String(b.word), 'nl');
+      }
+      return b.count - a.count || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0);
+    });
 }
 
 function getUnmasteredWordsForReading() {
@@ -4674,30 +4787,42 @@ function renderWordReadingList(words, mode = 'unmastered', deck = 'wordbook') {
 }
 
 function setActiveReadingWord(id) {
-  if (!elements.wordbookReadingList) return;
-  elements.wordbookReadingList.querySelectorAll('.wordbook-reading-item').forEach(item => {
-    const active = String(item.dataset.readWordId) === String(id);
-    item.classList.toggle('reading', active);
-    if (active) item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  });
+  if (!wordReadingState.inlineOnly) {
+    document.querySelectorAll('.wordbook-reading-item').forEach(item => {
+      const active = String(item.dataset.readWordId) === String(id);
+      item.classList.toggle('reading', active);
+      if (active) item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  } else {
+    document.querySelectorAll('.wordbook-reading-item').forEach(item => item.classList.remove('reading'));
+  }
   document.querySelectorAll('.wordbook-card').forEach(card => {
-    card.classList.toggle('reading', String(card.dataset.wordId) === String(id));
+    const active = String(card.dataset.wordId) === String(id);
+    card.classList.toggle('reading', active);
+    if (active) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
 }
 
 async function startWordListReading(options = {}) {
   const mode = options.mode || 'unmastered';
   const deck = options.deck || 'wordbook';
-  const words = getWordsForReading(mode, deck);
+  const words = getWordsForReading(mode, deck, options);
   if (!words.length) {
     alert(mode === 'mastered' ? '当前没有已掌握的归档单词可播放。' : '当前没有未掌握的单词可播放。');
     return;
   }
   stopWordListReading({ keepPanel: true });
-  renderWordReadingList(words, mode, deck);
   wordReadingState.active = true;
   wordReadingState.stopRequested = false;
   wordReadingState.deck = deck;
+  wordReadingState.inlineOnly = !!options.inlineOnly;
+  if (options.inlineOnly) {
+    const reading = getReadingElements(deck);
+    if (reading.panel) reading.panel.classList.add('hidden');
+    if (reading.list) reading.list.innerHTML = '';
+  } else {
+    renderWordReadingList(words, mode, deck);
+  }
   if (elements.wordbookReadUnmastered) elements.wordbookReadUnmastered.disabled = true;
   if (elements.a2VocabReadUnmastered) elements.a2VocabReadUnmastered.disabled = true;
   if (elements.wordbookStopReading) elements.wordbookStopReading.disabled = false;
@@ -4735,6 +4860,7 @@ function stopWordListReading(options = {}) {
 function finishWordListReading(options = {}) {
   wordReadingState.active = false;
   wordReadingState.currentAudio = null;
+  wordReadingState.inlineOnly = false;
   setActiveReadingWord(null);
   if (!options.keepPanel && wordReadingState.stopRequested) {
     showFeedback('已结束未掌握单词阅读。', 'info');
@@ -4829,15 +4955,19 @@ function startWordReview(wordId = null, options = {}) {
   stopWordListReading({ keepPanel: true, silent: true });
   const deck = options.deck || 'wordbook';
   const deckEntries = getWordDeckEntries(deck);
+  const limit = options.limit ? Math.max(1, toNumber(options.limit, 20)) : 0;
   const sortedDeckEntries = deckEntries
     .filter(item => {
       if (options.onlyMastered) return toNumber(item.masteryScore, 0) >= 100;
       if (options.onlyUnmastered) return toNumber(item.masteryScore, 0) < 100;
       return true;
     })
-    .sort((a, b) => (b.count || 0) - (a.count || 0) || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0));
-  const selectedEntries = options.random ? shuffleArray(sortedDeckEntries) : sortedDeckEntries;
-  const limitedEntries = options.limit ? selectedEntries.slice(0, Math.max(1, toNumber(options.limit, 20))) : selectedEntries;
+    .sort(options.weakest ? compareWordUnfamiliarity : compareWordReviewPriority);
+  const selectionPool = options.random && options.weakest && limit
+    ? sortedDeckEntries.slice(0, Math.min(sortedDeckEntries.length, Math.max(limit * 2, limit)))
+    : sortedDeckEntries;
+  const selectedEntries = options.random ? shuffleArray(selectionPool) : selectionPool;
+  const limitedEntries = limit ? selectedEntries.slice(0, limit) : selectedEntries;
   const ids = wordId
     ? [wordId]
     : limitedEntries.map(item => item.id);
@@ -4857,6 +4987,9 @@ function startWordReview(wordId = null, options = {}) {
     startTime: Date.now(),
     onlyUnmastered: !!options.onlyUnmastered,
     onlyMastered: !!options.onlyMastered,
+    random: !!options.random,
+    weakest: !!options.weakest,
+    limit,
     modeLabel: options.modeLabel || '',
     waitingForManualSummary: false,
     autoAdvanceTimer: null,
@@ -4868,14 +5001,37 @@ function startWordReview(wordId = null, options = {}) {
   renderReviewItem();
 }
 
+function compareWordReviewPriority(a, b) {
+  return (b.count || 0) - (a.count || 0)
+    || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0)
+    || String(a.word || '').localeCompare(String(b.word || ''), 'nl');
+}
+
+function compareWordUnfamiliarity(a, b) {
+  return toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0)
+    || toNumber(a.reviewCount, 0) - toNumber(b.reviewCount, 0)
+    || (b.count || 0) - (a.count || 0)
+    || String(a.word || '').localeCompare(String(b.word || ''), 'nl');
+}
+
+function getWordReviewSessionMode(review) {
+  if (review.onlyMastered) return 'masteredQuiz';
+  if (review.random && review.weakest) return 'randomWeakestReview';
+  if (review.random && review.onlyUnmastered) return 'randomUnmasteredReview';
+  if (review.random) return 'randomReview';
+  if (review.weakest) return 'weakestReview';
+  if (review.onlyUnmastered) return 'unmasteredReview';
+  return 'review';
+}
+
 function startA2VocabReview(wordId = null, options = {}) {
   startWordReview(wordId, { ...options, deck: 'a2vocab' });
 }
 
 function getA2ReviewCount() {
-  const value = toNumber(Number(elements.a2VocabReviewCount?.value), 20);
+  const value = toNumber(Number(elements.a2VocabReviewCount?.value), A2_DEFAULT_REVIEW_COUNT);
   const max = A2_VOCABULARY.length;
-  const count = Math.max(1, Math.min(max, Math.round(value || 20)));
+  const count = Math.max(1, Math.min(max, Math.round(value || A2_DEFAULT_REVIEW_COUNT)));
   if (elements.a2VocabReviewCount) elements.a2VocabReviewCount.value = count;
   return count;
 }
@@ -4939,7 +5095,7 @@ function completeReview(options = {}) {
     summary.duration = Date.now() - currentReview.startTime;
   }
 
-  if (currentReview.type === 'word' && currentReview.deck !== 'a2vocab' && currentReview.startTime && !currentReview.sessionRecorded) {
+  if (currentReview.type === 'word' && currentReview.startTime && !currentReview.sessionRecorded) {
     currentReview.sessionRecorded = true;
     const sessionId = currentReview.sessionId || `word-${currentReview.startTime}`;
     const alreadyRecorded = wordReviewSessions.some(session => session && session.sessionId === sessionId);
@@ -4950,8 +5106,14 @@ function completeReview(options = {}) {
         duration: summary.duration,
         averageScore: summary.average,
         reviewedCount: currentReview.doneIds.size,
-        mode: currentReview.onlyMastered ? 'masteredQuiz' : (currentReview.onlyUnmastered ? 'unmasteredReview' : 'review'),
+        mode: getWordReviewSessionMode(currentReview),
+        modeLabel: currentReview.modeLabel || '',
         deck: currentReview.deck || 'wordbook',
+        limit: toNumber(currentReview.limit, 0),
+        random: !!currentReview.random,
+        weakest: !!currentReview.weakest,
+        onlyUnmastered: !!currentReview.onlyUnmastered,
+        onlyMastered: !!currentReview.onlyMastered,
       });
       wordReviewSessions = normalizeWordReviewSessions(wordReviewSessions).slice(-120);
       saveWordReviewSessions();

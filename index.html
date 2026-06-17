@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>荷兰语听写练习</title>
   <link rel="icon" href="dutch-listen-icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=20260617-mastered-articles-collapse" />
+  <link rel="stylesheet" href="styles.css?v=20260617-a2-reading-order-highlight" />
 </head>
 <body>
   <header class="app-header">
@@ -298,13 +298,16 @@
         </div>
       </div>
       <div class="field-row wordbook-review-controls">
-        <button id="a2-vocab-review-all" class="btn btn-primary">批量复习A2动词</button>
-        <button id="a2-vocab-review-unmastered" class="btn btn-secondary">只复习未掌握单词</button>
-        <button id="a2-vocab-review-random" class="btn btn-secondary">随机复习未掌握</button>
+        <button id="a2-vocab-review-all" class="btn btn-primary">全部批量复习</button>
+        <button id="a2-vocab-review-unmastered" class="btn btn-secondary">只复习未掌握</button>
+        <button id="a2-vocab-review-weakest" class="btn btn-secondary">复习最陌生</button>
         <label class="a2-review-count-control">
           <span>本次数量</span>
           <input id="a2-vocab-review-count" type="number" min="1" max="121" value="20" inputmode="numeric" />
         </label>
+        <button id="a2-vocab-review-random-all" class="btn btn-secondary">随机复习</button>
+        <button id="a2-vocab-review-random" class="btn btn-secondary">随机未掌握</button>
+        <button id="a2-vocab-review-random-weakest" class="btn btn-secondary">随机最陌生</button>
         <button id="a2-vocab-read-unmastered" class="btn btn-secondary">列表播放未掌握单词</button>
       </div>
       <div id="a2-vocab-reading-panel" class="wordbook-reading-panel hidden">
@@ -332,7 +335,7 @@
         <div class="backup-mode-card">
           <div class="backup-mode-header">
             <h3>快速备份</h3>
-            <p>适合你自己日常备份，导出一个 JSON 文件，包含文章、文章库归档统计、错题本、错题本掌握统计、A2动词词表、A2掌握统计、A2进度、复习与全文默写记录。</p>
+            <p>适合你自己日常备份，导出一个 JSON 文件，包含文章、文章库归档统计、错题本、错题本掌握统计、A2动词词表、A2批量复习格式、A2掌握统计、A2进度、复习与全文默写记录。</p>
           </div>
           <button id="backup-export" class="btn btn-primary">快速导出 JSON</button>
           <div class="field-row">
@@ -348,7 +351,7 @@
         <div class="backup-mode-card">
           <div class="backup-mode-header">
             <h3>完整备份</h3>
-            <p>适合发给别人，导出 ZIP：里面包含 JSON、A2动词进度、复习与全文默写记录，以及独立音频文件。</p>
+            <p>适合发给别人，导出 ZIP：里面包含 JSON、A2动词进度、A2批量复习格式、复习与全文默写记录，以及独立音频文件。</p>
           </div>
           <button id="backup-export-zip" class="btn btn-secondary">完整导出 ZIP</button>
           <div class="field-row">
@@ -434,6 +437,6 @@
     </div>
   </template>
 
-  <script src="app.js?v=20260617-article-library-backup"></script>
+  <script src="app.js?v=20260617-a2-batch-review"></script>
 </body>
 </html>
