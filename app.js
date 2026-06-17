@@ -5423,6 +5423,10 @@ function getLocalDateKey(date) {
   return `${year}-${month}-${day}`;
 }
 
+function isSameLocalDay(a, b) {
+  return getLocalDateKey(a) === getLocalDateKey(b);
+}
+
 function renderArticleList() {
   if (!elements.articles) return;
   elements.articles.innerHTML = '';
