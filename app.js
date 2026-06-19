@@ -906,6 +906,14 @@ function getWordDeckEntry(id, deck = 'wordbook') {
   return getWordDeckEntries(deck).find(item => String(item.id) === String(id));
 }
 
+function isWordEntryMastered(item) {
+  return Math.round(toNumber(item?.masteryScore, 0)) >= 100;
+}
+
+function isWordEntryUnmastered(item) {
+  return !isWordEntryMastered(item);
+}
+
 function saveWordDeckEntry(entry, deck = 'wordbook') {
   if (deck === 'a2vocab') {
     saveA2VocabEntryProgress(entry);
@@ -1620,7 +1628,7 @@ function getAudioUrl(audioId) {
       ? Math.round(normalizedWordBook.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / totalMistakeWords)
       : 0;
     const mostReviewedUnmasteredWords = normalizedWordBook
-      .filter(item => toNumber(item.masteryScore, 0) < 100)
+      .filter(isWordEntryUnmastered)
       .sort((a, b) => toNumber(b.reviewCount, 0) - toNumber(a.reviewCount, 0) || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0))
       .slice(0, 10)
       .map(item => ({
@@ -1631,7 +1639,7 @@ function getAudioUrl(audioId) {
       }));
     const a2MasteryStats = getWordBookMasteryStats(a2VocabEntries);
     const a2ReviewedWords = a2VocabEntries.filter(item => toNumber(item.reviewCount, 0) > 0 || (Array.isArray(item.history) && item.history.length)).length;
-    const a2MasteredWords = a2VocabEntries.filter(item => toNumber(item.masteryScore, 0) >= 100).length;
+    const a2MasteredWords = a2VocabEntries.filter(isWordEntryMastered).length;
     const a2PendingWords = Math.max(0, a2VocabEntries.length - a2MasteredWords);
     const a2AverageMastery = a2VocabEntries.length
       ? Math.round(a2VocabEntries.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / a2VocabEntries.length)
@@ -2033,6 +2041,7 @@ function getAudioUrl(audioId) {
         { mode: 'randomUnmasteredReview', label: '随机未掌握', random: true, weakest: false, onlyUnmastered: true },
         { mode: 'randomWeakestReview', label: '随机最陌生', random: true, weakest: true, onlyUnmastered: false },
       ],
+      unmasteredSort: ['masteryScore:asc', 'reviewCount:asc', 'count:desc', 'word:asc'],
       weakestSort: ['masteryScore:asc', 'reviewCount:asc', 'count:desc', 'word:asc'],
       randomWeakestPoolMultiplier: 2,
       masteredReading: {
@@ -3764,13 +3773,13 @@ function showReport() {
       .sort((a, b) => (a.masteryScore || 0) - (b.masteryScore || 0) || (b.count || 0) - (a.count || 0))
       .slice(0, 6);
     const mostReviewedUnmasteredWords = wordBook
-      .filter(item => (item.masteryScore || 0) < 100)
+      .filter(isWordEntryUnmastered)
       .sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0) || (a.masteryScore || 0) - (b.masteryScore || 0) || (b.count || 0) - (a.count || 0))
       .slice(0, 6);
     const a2VocabEntries = getA2VocabEntries();
     const a2Stats = getWordBookMasteryStats(a2VocabEntries);
     const a2ReviewedWords = a2VocabEntries.filter(item => toNumber(item.reviewCount, 0) > 0 || (Array.isArray(item.history) && item.history.length)).length;
-    const a2MasteredWords = a2VocabEntries.filter(item => toNumber(item.masteryScore, 0) >= 100).length;
+    const a2MasteredWords = a2VocabEntries.filter(isWordEntryMastered).length;
     const a2PendingWords = Math.max(0, a2VocabEntries.length - a2MasteredWords);
     const a2AverageMastery = a2VocabEntries.length
       ? Math.round(a2VocabEntries.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / a2VocabEntries.length)
@@ -4446,7 +4455,7 @@ function renderWordBookPage() {
   const overall = articles.reduce((sum, article) => sum + (article.sentences?.reduce((ss, sentence) => ss + (sentence.masteryScore || 0), 0) || 0), 0);
   const countScores = articles.reduce((sum, article) => sum + (article.sentences?.length || 0), 0);
   const overallMastery = countScores ? Math.round(overall / countScores) : 0;
-  const pending = wordBook.filter(item => toNumber(item.masteryScore, 0) < 100).length;
+  const pending = wordBook.filter(isWordEntryUnmastered).length;
 
   if (elements.wordbookTotalWords) elements.wordbookTotalWords.textContent = totalWords;
   if (elements.wordbookTotalSentences) elements.wordbookTotalSentences.textContent = wrongSentences.length;
@@ -4466,8 +4475,8 @@ function renderWordBookPage() {
   }
 
   const sortedWords = wordBook.slice().sort((a, b) => b.count - a.count || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0));
-  const activeWords = sortedWords.filter(item => toNumber(item.masteryScore, 0) < 100);
-  const masteredWords = sortedWords.filter(item => toNumber(item.masteryScore, 0) >= 100);
+  const activeWords = sortedWords.filter(isWordEntryUnmastered);
+  const masteredWords = sortedWords.filter(isWordEntryMastered);
   const archivedWithAudio = masteredWords.filter(item => item.audioId).length;
   const archivedRecent = masteredWords.filter(item => {
     const timestamp = item.lastSeen ? new Date(item.lastSeen).getTime() : 0;
@@ -4768,7 +4777,7 @@ function renderWordBookCard(item, isMastered = false) {
 function renderA2VocabPage() {
   const entries = getA2VocabEntries();
   const reviewed = entries.filter(item => toNumber(item.reviewCount, 0) > 0).length;
-  const pending = entries.filter(item => toNumber(item.masteryScore, 0) < 100).length;
+  const pending = entries.filter(isWordEntryUnmastered).length;
   const overallMastery = entries.length
     ? Math.round(entries.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / entries.length)
     : 0;
@@ -4784,10 +4793,10 @@ function renderA2VocabPage() {
 
   if (!elements.a2VocabList) return;
   const activeWords = entries
-    .filter(item => toNumber(item.masteryScore, 0) < 100)
+    .filter(isWordEntryUnmastered)
     .sort((a, b) => toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0) || a.word.localeCompare(b.word, 'nl'));
   const masteredWords = entries
-    .filter(item => toNumber(item.masteryScore, 0) >= 100)
+    .filter(isWordEntryMastered)
     .sort((a, b) => a.word.localeCompare(b.word, 'nl'));
   const masteredWithAudio = masteredWords.filter(item => item.audioId).length;
   const masteredReviewCount = masteredWords.reduce((sum, item) => sum + toNumber(item.reviewCount, 0), 0);
@@ -4936,14 +4945,14 @@ function handleWordbookListClick(event) {
 
 function getMasteredWordBookQuizCount() {
   const input = elements.wordbookList?.querySelector('.wordbook-mastered-quiz-count');
-  const masteredCount = wordBook.filter(item => toNumber(item.masteryScore, 0) >= 100).length;
+  const masteredCount = wordBook.filter(isWordEntryMastered).length;
   const count = Math.max(1, Math.min(Math.max(1, masteredCount), Math.round(Number(input?.value) || 10)));
   if (input) input.value = count;
   return count;
 }
 
 function startMasteredWordBookQuiz() {
-  const masteredWords = wordBook.filter(item => toNumber(item.masteryScore, 0) >= 100);
+  const masteredWords = wordBook.filter(isWordEntryMastered);
   if (!masteredWords.length) {
     alert('当前还没有已掌握归档单词可抽查。');
     return;
@@ -4960,7 +4969,7 @@ function startMasteredWordBookQuiz() {
 function getWordsForReading(mode = 'unmastered', deck = 'wordbook', options = {}) {
   const mastered = mode === 'mastered';
   return getWordDeckEntries(deck)
-    .filter(item => mastered ? toNumber(item.masteryScore, 0) >= 100 : toNumber(item.masteryScore, 0) < 100)
+    .filter(item => mastered ? isWordEntryMastered(item) : isWordEntryUnmastered(item))
     .sort((a, b) => {
       if (options.sortBy === 'word') {
         return String(a.word).localeCompare(String(b.word), 'nl');
@@ -5187,11 +5196,11 @@ function startWordReview(wordId = null, options = {}) {
   const limit = options.limit ? Math.max(1, toNumber(options.limit, 20)) : 0;
   const sortedDeckEntries = deckEntries
     .filter(item => {
-      if (options.onlyMastered) return toNumber(item.masteryScore, 0) >= 100;
-      if (options.onlyUnmastered) return toNumber(item.masteryScore, 0) < 100;
+      if (options.onlyMastered) return isWordEntryMastered(item);
+      if (options.onlyUnmastered) return isWordEntryUnmastered(item);
       return true;
     })
-    .sort(options.weakest ? compareWordUnfamiliarity : compareWordReviewPriority);
+    .sort(getWordReviewComparator(deck, options));
   const selectionPool = options.random && options.weakest && limit
     ? sortedDeckEntries.slice(0, Math.min(sortedDeckEntries.length, Math.max(limit * 2, limit)))
     : sortedDeckEntries;
@@ -5234,6 +5243,13 @@ function compareWordReviewPriority(a, b) {
   return (b.count || 0) - (a.count || 0)
     || toNumber(a.masteryScore, 0) - toNumber(b.masteryScore, 0)
     || String(a.word || '').localeCompare(String(b.word || ''), 'nl');
+}
+
+function getWordReviewComparator(deck, options = {}) {
+  if (options.weakest || (deck === 'a2vocab' && options.onlyUnmastered)) {
+    return compareWordUnfamiliarity;
+  }
+  return compareWordReviewPriority;
 }
 
 function compareWordUnfamiliarity(a, b) {
