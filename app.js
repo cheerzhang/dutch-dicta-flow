@@ -4,8 +4,8 @@ const WORD_REVIEW_SESSIONS_KEY = 'dutchDictaWordReviewSessions';
 const A2_VOCAB_PROGRESS_KEY = 'dutchDictaA2VocabProgress';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
-const BACKUP_VERSION = 9;
-const REPORT_SCHEMA_VERSION = 6;
+const BACKUP_VERSION = 10;
+const REPORT_SCHEMA_VERSION = 7;
 const A2_VOCAB_SCHEMA_VERSION = 1;
 const A2_DEFAULT_REVIEW_COUNT = 20;
 
@@ -443,7 +443,16 @@ function bindEvents() {
   if (navButtons && navButtons.forEach) {
     navButtons.forEach(btn => btn.addEventListener('click', handlePageNav));
   }
+  if (elements.reportSummary) {
+    elements.reportSummary.addEventListener('click', handleReportActionClick);
+  }
   document.addEventListener('keydown', handleGlobalKeydown);
+}
+
+function handleReportActionClick(event) {
+  const button = event.target.closest('[data-report-page]');
+  if (!button) return;
+  showSection(button.dataset.reportPage || 'report');
 }
 
 let playAllState = {
@@ -1475,6 +1484,8 @@ function getAudioUrl(audioId) {
 
   function getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions) {
     const wordBookReviewSessions = getWordBookReviewSessions(normalizedWordReviewSessions);
+    const a2ReviewSessions = normalizeWordReviewSessions(normalizedWordReviewSessions).filter(session => session.deck === 'a2vocab');
+    const a2VocabEntries = getA2VocabEntries();
     const now = new Date();
     const oneDayMs = 24 * 60 * 60 * 1000;
     const dateKey = date => getLocalDateKey(date);
@@ -1513,8 +1524,14 @@ function getAudioUrl(audioId) {
       type: 'word',
       title: '单词复习',
     }));
-    const timedStudySessions = [...articleReviewSessions, ...recitationSessions, ...wordSessions];
+    const a2Sessions = a2ReviewSessions.map(session => ({
+      ...session,
+      type: 'a2vocab',
+      title: 'A2 动词复习',
+    }));
+    const timedStudySessions = [...articleReviewSessions, ...recitationSessions, ...wordSessions, ...a2Sessions];
     const totalDuration = timedStudySessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+    const a2Duration = a2Sessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
     const sessionsLast7 = timedStudySessions.filter(session => {
       const date = new Date(session.timestamp);
       return !Number.isNaN(date.getTime()) && (now - date) <= 7 * oneDayMs;
@@ -1612,6 +1629,32 @@ function getAudioUrl(audioId) {
         mistakeCount: toNumber(item.count, 0),
         masteryScore: Math.round(toNumber(item.masteryScore, 0)),
       }));
+    const a2MasteryStats = getWordBookMasteryStats(a2VocabEntries);
+    const a2ReviewedWords = a2VocabEntries.filter(item => toNumber(item.reviewCount, 0) > 0 || (Array.isArray(item.history) && item.history.length)).length;
+    const a2MasteredWords = a2VocabEntries.filter(item => toNumber(item.masteryScore, 0) >= 100).length;
+    const a2PendingWords = Math.max(0, a2VocabEntries.length - a2MasteredWords);
+    const a2AverageMastery = a2VocabEntries.length
+      ? Math.round(a2VocabEntries.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / a2VocabEntries.length)
+      : 0;
+    const a2AudioCount = a2VocabEntries.filter(item => item.audioId).length;
+    const a2TotalReviews = a2VocabEntries.reduce((sum, item) => sum + toNumber(item.reviewCount, 0), 0);
+    const a2WeakestWords = a2VocabEntries
+      .slice()
+      .sort(compareWordUnfamiliarity)
+      .slice(0, 10)
+      .map(item => ({
+        id: item.id,
+        word: item.word,
+        translation: item.translation,
+        reviewCount: toNumber(item.reviewCount, 0),
+        mistakeCount: toNumber(item.count, 0),
+        masteryScore: Math.round(toNumber(item.masteryScore, 0)),
+      }));
+    const a2ModeCounts = a2ReviewSessions.reduce((map, session) => {
+      const key = session.mode || 'review';
+      map[key] = (map[key] || 0) + 1;
+      return map;
+    }, {});
 
     const dailyStudyLast30 = [];
     for (let i = 29; i >= 0; i -= 1) {
@@ -1787,12 +1830,14 @@ function getAudioUrl(audioId) {
       calendarYear,
     ])).sort((a, b) => a - b);
 
-    const reviewedUnits = Math.max(1, sentenceHistory.length + wordBookReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
+    const reviewedUnits = Math.max(1, sentenceHistory.length
+      + wordBookReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0)
+      + a2ReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
     const avgMsPerUnit = Math.min(180000, Math.max(20000, Math.round(totalDuration / reviewedUnits) || 60000));
     const avgDailyMs7 = Math.round(study7Ms / 7);
     const avgActiveDayMs7 = activeDays7 ? Math.round(study7Ms / activeDays7) : 0;
     const recitationNeedsPractice = recitationArticleStats.filter(item => item.averageScore < 90).length;
-    const remainingUnits = pendingSentences + activeMistakeWords + recitationNeedsPractice;
+    const remainingUnits = pendingSentences + activeMistakeWords + a2PendingWords + recitationNeedsPractice;
     const estimatedRemainingMs = remainingUnits * avgMsPerUnit * 2;
     const estimateBasisMs = avgDailyMs7 || (totalDuration ? Math.round(totalDuration / Math.max(activeDays30, 1)) : 0);
     const estimatedDays = remainingUnits === 0 ? 0 : estimateBasisMs ? Math.max(1, Math.ceil(estimatedRemainingMs / estimateBasisMs)) : null;
@@ -1812,11 +1857,13 @@ function getAudioUrl(audioId) {
         'articles.reviewSessions',
         'articles.recitationSessions',
         'wordReviewSessions',
+        'a2VocabProgress',
       ],
       inventory: {
         articles: normalizedArticles.length,
         sentences: totalSentences,
         mistakeWords: totalMistakeWords,
+        a2Words: a2VocabEntries.length,
         recitedArticles: recitationArticleStats.length,
       },
       mastery: {
@@ -1835,6 +1882,7 @@ function getAudioUrl(audioId) {
         last7Duration: study7Ms,
         last30Duration: study30Ms,
         totalDuration,
+        a2Duration,
         last7Quality: qualityLast7,
         activeDaysLast30: activeDays30,
         currentStreak,
@@ -1845,6 +1893,7 @@ function getAudioUrl(audioId) {
         remainingUnits,
         pendingSentences,
         activeMistakeWords,
+        a2PendingWords,
         recitationNeedsPractice,
         estimatedRemainingDuration: estimatedRemainingMs,
         estimateBasisDurationPerDay: estimateBasisMs,
@@ -1865,6 +1914,49 @@ function getAudioUrl(audioId) {
         activeWords: activeMistakeWords,
         averageMastery: avgMistakeWordMastery,
       },
+      a2Vocabulary: {
+        totalWords: a2VocabEntries.length,
+        reviewedWords: a2ReviewedWords,
+        masteredWords: a2MasteredWords,
+        pendingWords: a2PendingWords,
+        averageMastery: a2AverageMastery,
+        audioCount: a2AudioCount,
+        totalReviews: a2TotalReviews,
+        reviewSessionCount: a2ReviewSessions.length,
+        duration: a2Duration,
+        modeCounts: a2ModeCounts,
+        masteryStats: a2MasteryStats,
+      },
+      dashboardActions: [
+        {
+          page: 'list',
+          label: '复习文章',
+          value: pendingSentences,
+          unit: '待掌握句子',
+          primary: pendingSentences > 0,
+        },
+        {
+          page: 'wordbook',
+          label: '清理错题本',
+          value: activeMistakeWords,
+          unit: '待掌握错词',
+          primary: activeMistakeWords > 0 && pendingSentences === 0,
+        },
+        {
+          page: 'a2vocab',
+          label: '练 A2 动词',
+          value: a2PendingWords,
+          unit: '未完全掌握',
+          primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords > 0,
+        },
+        {
+          page: 'recite',
+          label: '全文默写',
+          value: recitationNeedsPractice,
+          unit: '待稳定文章',
+          primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords === 0,
+        },
+      ],
       charts: {
         dailyStudyLast30,
         dailyQualityLast14,
@@ -1875,6 +1967,7 @@ function getAudioUrl(audioId) {
           yMastery: item.mastery,
           sentenceCount: item.sentenceCount,
         })),
+        a2MasteryBuckets: a2MasteryStats.buckets,
       },
       calendars: {
         currentYear: calendarYear,
@@ -1891,6 +1984,7 @@ function getAudioUrl(audioId) {
           .slice(0, 10),
         recitationByArticle: recitationArticleStats,
         mostReviewedUnmasteredWords,
+        a2WeakestWords,
       },
       counts: {
         articles: normalizedArticles.length,
@@ -1898,6 +1992,8 @@ function getAudioUrl(audioId) {
         articleReviewSessions: articleReviewSessions.length,
         recitationSessions: portableRecitationSessions.length,
         wordReviewSessions: wordBookReviewSessions.length,
+        a2ReviewSessions: a2ReviewSessions.length,
+        a2Words: a2VocabEntries.length,
       },
     };
   }
@@ -3344,17 +3440,24 @@ function showReport() {
       })));
     });
     const wordBookReviewSessions = getWordBookReviewSessions();
+    const a2ReviewSessions = normalizeWordReviewSessions(wordReviewSessions).filter(session => session.deck === 'a2vocab');
     const timedWordSessions = wordBookReviewSessions.map(session => ({
       ...session,
       type: 'word',
       title: '单词复习',
     }));
-    const timedStudySessions = [...timedReviewSessions, ...timedRecitationSessions, ...timedWordSessions];
+    const timedA2Sessions = a2ReviewSessions.map(session => ({
+      ...session,
+      type: 'a2vocab',
+      title: 'A2 动词复习',
+    }));
+    const timedStudySessions = [...timedReviewSessions, ...timedRecitationSessions, ...timedWordSessions, ...timedA2Sessions];
     const timedDurationsMs = timedReviewSessions.reduce((sum, session) => sum + session.duration, 0);
     const recitationDurationsMs = timedRecitationSessions.reduce((sum, session) => sum + session.duration, 0);
     const wordDurationsMs = timedWordSessions.reduce((sum, session) => sum + session.duration, 0);
+    const a2DurationsMs = timedA2Sessions.reduce((sum, session) => sum + session.duration, 0);
     const legacyDurationsMs = legacyReviewDurations.reduce((sum, duration) => sum + duration, 0);
-    const totalDurationsMs = timedDurationsMs + recitationDurationsMs + wordDurationsMs + legacyDurationsMs;
+    const totalDurationsMs = timedDurationsMs + recitationDurationsMs + wordDurationsMs + a2DurationsMs + legacyDurationsMs;
     const totalSessions = timedStudySessions.length + legacyReviewDurations.length;
     const totalRecitationSessions = timedRecitationSessions.length;
     const avgRecitationScore = totalRecitationSessions
@@ -3501,11 +3604,15 @@ function showReport() {
       .sort((a, b) => b.ms - a.ms);
     const wordReviewSessionsToday = wordBookReviewSessions
       .filter(session => isSameDay(new Date(session.timestamp), now));
+    const a2ReviewSessionsToday = a2ReviewSessions
+      .filter(session => isSameDay(new Date(session.timestamp), now));
     const wordTodayMs = wordReviewSessionsToday.reduce((sum, session) => sum + session.duration, 0);
+    const a2TodayMs = a2ReviewSessionsToday.reduce((sum, session) => sum + session.duration, 0);
     const todayReviewDistribution = [
       ...todayArticleDurations,
       ...todayRecitationDurations,
       ...(wordTodayMs > 0 ? [{ title: '单词复习', ms: wordTodayMs, word: true }] : []),
+      ...(a2TodayMs > 0 ? [{ title: 'A2 动词', ms: a2TodayMs, a2: true }] : []),
     ].sort((a, b) => b.ms - a.ms);
     const maxTodayDistributionMs = Math.max(...todayReviewDistribution.map(item => item.ms), 1);
     const chartGridLines = [0, 25, 50, 75, 100];
@@ -3606,7 +3713,7 @@ function showReport() {
           label: item.title,
           value: Math.max(1, Math.round(item.ms / 1000)),
           valueLabel: formatDuration(item.ms),
-          className: item.word ? 'word-bar' : item.recite ? 'recite-bar' : '',
+          className: item.a2 ? 'a2-bar' : item.word ? 'word-bar' : item.recite ? 'recite-bar' : '',
         })), {
           title: '今天复习时间分布',
           maxValue: Math.max(1, Math.round(maxTodayDistributionMs / 1000)),
@@ -3660,6 +3767,39 @@ function showReport() {
       .filter(item => (item.masteryScore || 0) < 100)
       .sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0) || (a.masteryScore || 0) - (b.masteryScore || 0) || (b.count || 0) - (a.count || 0))
       .slice(0, 6);
+    const a2VocabEntries = getA2VocabEntries();
+    const a2Stats = getWordBookMasteryStats(a2VocabEntries);
+    const a2ReviewedWords = a2VocabEntries.filter(item => toNumber(item.reviewCount, 0) > 0 || (Array.isArray(item.history) && item.history.length)).length;
+    const a2MasteredWords = a2VocabEntries.filter(item => toNumber(item.masteryScore, 0) >= 100).length;
+    const a2PendingWords = Math.max(0, a2VocabEntries.length - a2MasteredWords);
+    const a2AverageMastery = a2VocabEntries.length
+      ? Math.round(a2VocabEntries.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / a2VocabEntries.length)
+      : 0;
+    const a2AudioCount = a2VocabEntries.filter(item => item.audioId).length;
+    const a2TotalReviews = a2VocabEntries.reduce((sum, item) => sum + toNumber(item.reviewCount, 0), 0);
+    const a2WeakestWords = a2VocabEntries
+      .slice()
+      .sort(compareWordUnfamiliarity)
+      .slice(0, 5);
+    const a2ModeCounts = a2ReviewSessions.reduce((map, session) => {
+      const key = session.mode || 'review';
+      map[key] = (map[key] || 0) + 1;
+      return map;
+    }, {});
+    const a2ModeLabelMap = {
+      review: '全部',
+      unmasteredReview: '未掌握',
+      weakestReview: '最陌生',
+      randomReview: '随机',
+      randomUnmasteredReview: '随机未掌握',
+      randomWeakestReview: '随机最陌生',
+      masteredQuiz: '归档抽查',
+    };
+    const a2ModeSummary = Object.entries(a2ModeCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([mode, count]) => `${a2ModeLabelMap[mode] || mode} ${count}次`)
+      .join(' · ');
     const masteredSentences = allSentences.filter(sentence => toNumber(sentence.masteryScore, 0) >= 90).length;
     const learningSentences = allSentences.filter(sentence => {
       const score = toNumber(sentence.masteryScore, 0);
@@ -3683,10 +3823,12 @@ function showReport() {
     const activeDays7 = new Set(sessionsLast7.map(session => dateKey(new Date(session.timestamp)))).size;
     const avgDailyMs7 = Math.round(study7Ms / 7);
     const avgActiveDayMs7 = activeDays7 ? Math.round(study7Ms / activeDays7) : 0;
-    const reviewedUnits = Math.max(1, reviewedCount + wordBookReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
+    const reviewedUnits = Math.max(1, reviewedCount
+      + wordBookReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0)
+      + a2ReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
     const avgMsPerUnit = Math.min(180000, Math.max(20000, Math.round(totalDurationsMs / reviewedUnits) || 60000));
     const recitationNeedsPractice = recitationArticleStats.filter(item => item.averageScore < 90).length;
-    const remainingUnits = pendingSentences + activeMistakeWords + recitationNeedsPractice;
+    const remainingUnits = pendingSentences + activeMistakeWords + a2PendingWords + recitationNeedsPractice;
     const estimatedRemainingMs = remainingUnits * avgMsPerUnit * 2;
     const estimateBasisMs = avgDailyMs7 || avgPerDayMs;
     const estimatedDays = remainingUnits === 0
@@ -3820,6 +3962,36 @@ function showReport() {
     const topPriorityArticles = articleMasteryStats
       .filter(item => item.mastery < 90)
       .slice(0, 5);
+    const actionCards = [
+      {
+        page: 'list',
+        label: '复习文章',
+        value: pendingSentences,
+        hint: '待掌握句子',
+        primary: pendingSentences > 0,
+      },
+      {
+        page: 'wordbook',
+        label: '清理错题本',
+        value: activeMistakeWords,
+        hint: '待掌握错词',
+        primary: activeMistakeWords > 0 && pendingSentences === 0,
+      },
+      {
+        page: 'a2vocab',
+        label: '练 A2 动词',
+        value: a2PendingWords,
+        hint: '未完全掌握',
+        primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords > 0,
+      },
+      {
+        page: 'recite',
+        label: '全文默写',
+        value: recitationNeedsPractice,
+        hint: '待稳定文章',
+        primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords === 0,
+      },
+    ];
     const progressSummaryText = estimatedDays === 0
       ? '当前待掌握量已经清空。'
       : estimatedDays
@@ -3834,7 +4006,9 @@ function showReport() {
       ? `下一步优先复习：“${escapeHtml(weakestSentences[0].articleTitle)}”里的低熟练度内容。`
       : activeMistakeWords > 0
         ? '下一步优先清理仍需复习的错词。'
-        : '当前薄弱项不多，可以开始挑战新文章。';
+        : a2PendingWords > 0
+          ? '下一步可以补 A2 动词专项，尤其是最陌生的一组。'
+          : '当前薄弱项不多，可以开始挑战新文章。';
     const masteryArc = Math.max(0, Math.min(100, overall));
     const summaryHtml = `
       <div class="report-dashboard">
@@ -3846,6 +4020,7 @@ function showReport() {
             <div class="report-hero-actions">
               <span>库里 ${articles.length} 篇文章</span>
               <span>已掌握 ${masteredSentences} / ${totalSentenceCount} 句</span>
+              <span>A2 已掌握 ${a2MasteredWords} / ${a2VocabEntries.length}</span>
               <span>近 7 天 ${formatDuration(study7Ms)}</span>
             </div>
           </div>
@@ -3857,10 +4032,20 @@ function showReport() {
           </div>
         </section>
 
+        <section class="report-action-grid" aria-label="下一步行动">
+          ${actionCards.map(card => `
+            <button type="button" class="report-action-card ${card.primary ? 'primary' : ''}" data-report-page="${card.page}">
+              <span>${escapeHtml(card.label)}</span>
+              <strong>${card.value}</strong>
+              <em>${escapeHtml(card.hint)}</em>
+            </button>
+          `).join('')}
+        </section>
+
         <section class="report-section-band">
           <div class="report-section-heading">
             <h3>我的资料库</h3>
-            <p>先看家底：多少文章、句子、错词和可默写内容。</p>
+            <p>先看家底：文章、句子、错词、A2 专项和可默写内容。</p>
           </div>
           <div class="report-inventory-grid">
             <div class="report-kpi-card">
@@ -3877,6 +4062,11 @@ function showReport() {
               <div class="report-kpi-icon">词</div>
               <div class="report-kpi-value">${totalMistakeWords}</div>
               <div class="report-kpi-label">错题本单词</div>
+            </div>
+            <div class="report-kpi-card">
+              <div class="report-kpi-icon">A2</div>
+              <div class="report-kpi-value">${a2VocabEntries.length}</div>
+              <div class="report-kpi-label">A2 动词</div>
             </div>
             <div class="report-kpi-card">
               <div class="report-kpi-icon">默</div>
@@ -3922,6 +4112,10 @@ function showReport() {
                 <div>
                   <strong>${avgMistakeWordMastery}%</strong>
                   <span>错词熟练度</span>
+                </div>
+                <div>
+                  <strong>${a2AverageMastery}%</strong>
+                  <span>A2 熟练度</span>
                 </div>
               </div>
             </div>
@@ -3997,6 +4191,10 @@ function showReport() {
                   <span>待掌握错词</span>
                 </div>
                 <div>
+                  <strong>${a2PendingWords}</strong>
+                  <span>A2 待掌握</span>
+                </div>
+                <div>
                   <strong>${recitationNeedsPractice}</strong>
                   <span>默写待稳定</span>
                 </div>
@@ -4027,7 +4225,7 @@ function showReport() {
         <section class="report-section-band">
           <div class="report-section-heading">
             <h3>专项状态</h3>
-            <p>错题本和全文默写作为辅助视角。</p>
+            <p>全文默写、错题本和 A2 动词分别看，不把不同训练混成一团。</p>
           </div>
           <div class="report-special-grid">
             <div class="report-summary-block">
@@ -4068,6 +4266,37 @@ function showReport() {
                   <span class="report-score-pill ${(item.masteryScore || 0) < 70 ? 'warning' : ''}">${Math.round(item.masteryScore || 0)}%</span>
                 </div>
               `).join('') : '<div class="empty-state">暂无反复复习后仍未掌握的单词。</div>'}
+            </div>
+            <div class="report-summary-block">
+              <div class="report-2d-header">
+                <h4>A2 动词</h4>
+                <span>${a2Stats.masteredCount} 个牢固掌握</span>
+              </div>
+              <div class="report-plan-grid compact">
+                <div><strong>${a2ReviewedWords}</strong><span>已复习</span></div>
+                <div><strong>${a2PendingWords}</strong><span>待掌握</span></div>
+                <div><strong>${a2AudioCount}</strong><span>有音频</span></div>
+                <div><strong>${a2TotalReviews}</strong><span>复习次数</span></div>
+              </div>
+              <div class="report-mini-bars">
+                ${a2Stats.buckets.map(bucket => `
+                  <div class="report-mini-bar ${bucket.key}">
+                    <span>${escapeHtml(bucket.label)}</span>
+                    <strong>${bucket.count}</strong>
+                    <i style="width:${Math.max(bucket.count ? 8 : 0, (bucket.count / Math.max(1, a2Stats.totalWords)) * 100)}%"></i>
+                  </div>
+                `).join('')}
+              </div>
+              <div class="report-row-value">${a2ModeSummary || '还没有 A2 批量复习记录。'}</div>
+              ${a2WeakestWords.length ? a2WeakestWords.slice(0, 4).map(item => `
+                <div class="report-weak-row">
+                  <div>
+                    <div class="report-row-title">${escapeHtml(item.word)}</div>
+                    <div class="report-row-value">${escapeHtml(item.translation || '暂无说明')} · 复习 ${toNumber(item.reviewCount, 0)} 次</div>
+                  </div>
+                  <span class="report-score-pill ${toNumber(item.masteryScore, 0) < 70 ? 'warning' : ''}">${Math.round(toNumber(item.masteryScore, 0))}%</span>
+                </div>
+              `).join('') : '<div class="empty-state">A2 词库为空。</div>'}
             </div>
           </div>
         </section>
