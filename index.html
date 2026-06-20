@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>荷兰语听写练习</title>
   <link rel="icon" href="dutch-listen-icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=20260619-report-dashboard" />
+  <link rel="stylesheet" href="styles.css?v=20260620-a2-review-controls" />
 </head>
 <body>
   <header class="app-header">
@@ -297,18 +297,33 @@
           </div>
         </div>
       </div>
-      <div class="field-row wordbook-review-controls">
-        <button id="a2-vocab-review-all" class="btn btn-primary">全部批量复习</button>
-        <button id="a2-vocab-review-unmastered" class="btn btn-secondary">只复习未掌握</button>
-        <button id="a2-vocab-review-weakest" class="btn btn-secondary">复习最陌生</button>
-        <label class="a2-review-count-control">
-          <span>本次数量</span>
-          <input id="a2-vocab-review-count" type="number" min="1" max="121" value="20" inputmode="numeric" />
-        </label>
-        <button id="a2-vocab-review-random-all" class="btn btn-secondary">随机复习</button>
-        <button id="a2-vocab-review-random" class="btn btn-secondary">随机未掌握</button>
-        <button id="a2-vocab-review-random-weakest" class="btn btn-secondary">随机最陌生</button>
-        <button id="a2-vocab-read-unmastered" class="btn btn-secondary">列表播放未掌握单词</button>
+      <div class="field-row wordbook-review-controls a2-review-controls">
+        <div class="a2-review-group primary">
+          <div class="a2-review-group-label">批量复习</div>
+          <div class="a2-review-button-row">
+            <button id="a2-vocab-review-all" class="btn btn-primary">全部批量复习</button>
+            <button id="a2-vocab-review-unmastered" class="btn btn-secondary">只复习未掌握</button>
+            <button id="a2-vocab-review-weakest" class="btn btn-secondary">复习最陌生</button>
+          </div>
+        </div>
+        <div class="a2-review-group">
+          <div class="a2-review-group-label">随机抽练</div>
+          <div class="a2-review-button-row">
+            <label class="a2-review-count-control">
+              <span>本次数量</span>
+              <input id="a2-vocab-review-count" type="number" min="1" max="121" value="20" inputmode="numeric" />
+            </label>
+            <button id="a2-vocab-review-random-all" class="btn btn-secondary">随机复习</button>
+            <button id="a2-vocab-review-random" class="btn btn-secondary">随机未掌握</button>
+            <button id="a2-vocab-review-random-weakest" class="btn btn-secondary">随机最陌生</button>
+          </div>
+        </div>
+        <div class="a2-review-group compact">
+          <div class="a2-review-group-label">朗读</div>
+          <div class="a2-review-button-row">
+            <button id="a2-vocab-read-unmastered" class="btn btn-secondary">列表播放未掌握单词</button>
+          </div>
+        </div>
       </div>
       <div id="a2-vocab-reading-panel" class="wordbook-reading-panel hidden">
         <div class="wordbook-reading-header">

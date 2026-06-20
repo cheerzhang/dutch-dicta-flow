@@ -2787,6 +2787,57 @@ button {
   box-shadow: 0 12px 30px rgba(30, 64, 175, 0.08);
 }
 
+.a2-review-controls {
+  grid-template-columns: minmax(260px, 1.1fr) minmax(320px, 1.55fr) minmax(220px, 0.75fr);
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px;
+}
+
+.a2-review-group {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #dbe7f5;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.a2-review-group.primary {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #ffffff, #eff6ff);
+}
+
+.a2-review-group.compact {
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+}
+
+.a2-review-group-label {
+  color: var(--muted-strong);
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.a2-review-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.a2-review-button-row .btn {
+  min-height: 40px;
+  width: auto;
+}
+
+.a2-review-group.primary .btn-primary {
+  min-width: 132px;
+}
+
 .a2-review-count-control,
 .wordbook-review-count-control {
   display: inline-grid;
@@ -4370,12 +4421,25 @@ body.modal-open {
     width: auto;
   }
 
+  .a2-review-controls {
+    grid-template-columns: 1fr;
+  }
+
   .wordbook-review-controls {
     grid-template-columns: 1fr;
   }
 
   .wordbook-review-controls .btn {
     width: 100%;
+  }
+
+  .a2-review-button-row .btn {
+    flex: 1 1 150px;
+    width: auto;
+  }
+
+  .a2-review-count-control {
+    flex: 1 1 180px;
   }
 
   .wordbook-reading-header {
