@@ -2671,7 +2671,8 @@ button {
 }
 
 #wordbook-panel,
-#a2-vocab-panel {
+#a2-vocab-panel,
+.custom-verb-panel {
   overflow: hidden;
   padding: 0;
   border-color: rgba(191, 219, 254, 0.86);
@@ -2682,7 +2683,8 @@ button {
 }
 
 #wordbook-panel > :not(.wordbook-hero),
-#a2-vocab-panel > :not(.wordbook-hero) {
+#a2-vocab-panel > :not(.wordbook-hero),
+.custom-verb-panel > :not(.wordbook-hero) {
   margin-left: 30px;
   margin-right: 30px;
 }
@@ -2785,6 +2787,21 @@ button {
     radial-gradient(circle at 98% 0%, rgba(56, 189, 248, 0.18), transparent 34%),
     linear-gradient(135deg, #eff6ff, #ffffff);
   box-shadow: 0 12px 30px rgba(30, 64, 175, 0.08);
+}
+
+.custom-verb-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, #ffffff, #eff6ff);
+  box-shadow: 0 12px 30px rgba(30, 64, 175, 0.08);
+}
+
+.custom-verb-review-controls {
+  grid-template-columns: repeat(3, minmax(160px, max-content));
 }
 
 .a2-review-controls {

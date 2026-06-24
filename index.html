@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>荷兰语听写练习</title>
   <link rel="icon" href="dutch-listen-icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=20260620-a2-review-controls" />
+  <link rel="stylesheet" href="styles.css?v=20260624-b1-b2-verbs" />
 </head>
 <body>
   <header class="app-header">
@@ -27,6 +27,8 @@
         <button class="btn btn-secondary nav-btn" data-page="recite">全文默写</button>
         <button class="btn btn-secondary nav-btn" data-page="wordbook">错题本</button>
         <button class="btn btn-secondary nav-btn" data-page="a2vocab">A2动词</button>
+        <button class="btn btn-secondary nav-btn" data-page="b1verbs">B1动词</button>
+        <button class="btn btn-secondary nav-btn" data-page="b2verbs">B2动词</button>
         <button class="btn btn-secondary nav-btn" data-page="report">报告页面</button>
         <button class="btn btn-secondary nav-btn" data-page="backup">数据备份</button>
       </nav>
@@ -343,14 +345,102 @@
         <div id="a2-vocab-list" class="wordbook-list"></div>
       </div>
     </section>
+    <section class="card hidden custom-verb-panel" id="b1-verb-panel" data-verb-deck="b1verbs">
+      <div class="wordbook-hero">
+        <div class="wordbook-hero-copy">
+          <div class="wordbook-kicker">Custom Verb Deck</div>
+          <h2>B1动词</h2>
+          <p>自建 B1 动词库：添加动词、中文说明和音频，然后反复拼写复习，目标是全部达到 100% 熟练度。</p>
+        </div>
+        <div class="wordbook-metrics">
+          <div class="report-metric"><h3>动词数</h3><div data-verb-stat="total">0</div></div>
+          <div class="report-metric"><h3>已掌握</h3><div data-verb-stat="mastered">0</div></div>
+          <div class="report-metric"><h3>总熟练度</h3><div data-verb-stat="mastery">0%</div></div>
+          <div class="report-metric"><h3>待复习</h3><div data-verb-stat="pending">0</div></div>
+        </div>
+      </div>
+      <form id="b1-verb-form" class="custom-verb-form">
+        <div class="field-row two-column">
+          <div>
+            <label>荷兰语动词原形</label>
+            <input name="word" type="text" placeholder="例如：aanbieden" required />
+          </div>
+          <div>
+            <label>中文说明</label>
+            <input name="translation" type="text" placeholder="例如：提供" />
+          </div>
+        </div>
+        <div class="field-row">
+          <label>上传音频</label>
+          <input name="audio" type="file" accept="audio/*" />
+        </div>
+        <button type="submit" class="btn btn-primary">添加B1动词</button>
+      </form>
+      <div class="field-row wordbook-review-controls custom-verb-review-controls">
+        <button type="button" class="btn btn-primary" data-verb-action="review-all">全部复习</button>
+        <button type="button" class="btn btn-secondary" data-verb-action="review-unmastered">只复习未掌握</button>
+        <button type="button" class="btn btn-secondary" data-verb-action="review-weakest">复习最陌生</button>
+      </div>
+      <div class="report-section">
+        <div class="report-section-header">
+          <h3>B1动词列表</h3>
+          <p>可编辑动词、中文说明和音频。熟练度达到 100% 后会进入已掌握区。</p>
+        </div>
+        <div id="b1-verb-list" class="wordbook-list"></div>
+      </div>
+    </section>
+    <section class="card hidden custom-verb-panel" id="b2-verb-panel" data-verb-deck="b2verbs">
+      <div class="wordbook-hero">
+        <div class="wordbook-hero-copy">
+          <div class="wordbook-kicker">Custom Verb Deck</div>
+          <h2>B2动词</h2>
+          <p>自建 B2 动词库：添加动词、中文说明和音频，然后反复拼写复习，目标是全部达到 100% 熟练度。</p>
+        </div>
+        <div class="wordbook-metrics">
+          <div class="report-metric"><h3>动词数</h3><div data-verb-stat="total">0</div></div>
+          <div class="report-metric"><h3>已掌握</h3><div data-verb-stat="mastered">0</div></div>
+          <div class="report-metric"><h3>总熟练度</h3><div data-verb-stat="mastery">0%</div></div>
+          <div class="report-metric"><h3>待复习</h3><div data-verb-stat="pending">0</div></div>
+        </div>
+      </div>
+      <form id="b2-verb-form" class="custom-verb-form">
+        <div class="field-row two-column">
+          <div>
+            <label>荷兰语动词原形</label>
+            <input name="word" type="text" placeholder="例如：veronderstellen" required />
+          </div>
+          <div>
+            <label>中文说明</label>
+            <input name="translation" type="text" placeholder="例如：假设，认为" />
+          </div>
+        </div>
+        <div class="field-row">
+          <label>上传音频</label>
+          <input name="audio" type="file" accept="audio/*" />
+        </div>
+        <button type="submit" class="btn btn-primary">添加B2动词</button>
+      </form>
+      <div class="field-row wordbook-review-controls custom-verb-review-controls">
+        <button type="button" class="btn btn-primary" data-verb-action="review-all">全部复习</button>
+        <button type="button" class="btn btn-secondary" data-verb-action="review-unmastered">只复习未掌握</button>
+        <button type="button" class="btn btn-secondary" data-verb-action="review-weakest">复习最陌生</button>
+      </div>
+      <div class="report-section">
+        <div class="report-section-header">
+          <h3>B2动词列表</h3>
+          <p>可编辑动词、中文说明和音频。熟练度达到 100% 后会进入已掌握区。</p>
+        </div>
+        <div id="b2-verb-list" class="wordbook-list"></div>
+      </div>
+    </section>
     <section class="card hidden" id="backup-panel">
       <h2>数据备份与存储说明</h2>
-      <p>文章、句子、复习记录、全文默写记录、A2动词进度和报告统计来源会保存在本地浏览器的 <strong>localStorage</strong> 中，句子与A2动词音频文件保存在浏览器的 <strong>IndexedDB</strong> 中。刷新、关闭浏览器后数据仍会保留，但如果浏览器缓存被清除或换设备，数据会丢失。</p>
+      <p>文章、句子、复习记录、全文默写记录、A2/B1/B2动词进度和报告统计来源会保存在本地浏览器的 <strong>localStorage</strong> 中，句子与动词音频文件保存在浏览器的 <strong>IndexedDB</strong> 中。刷新、关闭浏览器后数据仍会保留，但如果浏览器缓存被清除或换设备，数据会丢失。</p>
       <div class="backup-mode-grid">
         <div class="backup-mode-card">
           <div class="backup-mode-header">
             <h3>快速备份</h3>
-            <p>适合你自己日常备份，导出一个 JSON 文件，包含文章、文章库归档统计、错题本、错题本掌握统计、A2动词词表、A2批量复习格式、A2掌握统计、A2进度、新版报告仪表盘快照、复习与全文默写记录。</p>
+            <p>适合你自己日常备份，导出一个 JSON 文件，包含文章、文章库归档统计、错题本、B1/B2自建动词库、B1/B2复习格式与掌握统计、A2动词词表、A2掌握统计、新版报告仪表盘快照、复习与全文默写记录。</p>
           </div>
           <button id="backup-export" class="btn btn-primary">快速导出 JSON</button>
           <div class="field-row">
@@ -366,7 +456,7 @@
         <div class="backup-mode-card">
           <div class="backup-mode-header">
             <h3>完整备份</h3>
-            <p>适合发给别人，导出 ZIP：里面包含 JSON、A2动词进度、A2批量复习格式、新版报告仪表盘快照、复习与全文默写记录，以及独立音频文件。</p>
+            <p>适合发给别人，导出 ZIP：里面包含 JSON、A2/B1/B2动词进度、B1/B2掌握统计、新版报告仪表盘快照、复习与全文默写记录，以及独立音频文件。</p>
           </div>
           <button id="backup-export-zip" class="btn btn-secondary">完整导出 ZIP</button>
           <div class="field-row">
@@ -452,6 +542,6 @@
     </div>
   </template>
 
-  <script src="app.js?v=20260619-word-mastered-rounding"></script>
+  <script src="app.js?v=20260624-backup-v12"></script>
 </body>
 </html>
