@@ -186,6 +186,9 @@ const elements = {
   b2VerbForm: document.getElementById('b2-verb-form'),
   b1VerbList: document.getElementById('b1-verb-list'),
   b2VerbList: document.getElementById('b2-verb-list'),
+  b1VerbReadingPanel: document.getElementById('b1-verb-reading-panel'),
+  b1VerbReadingList: document.getElementById('b1-verb-reading-list'),
+  b1VerbStopReading: document.getElementById('b1-verb-stop-reading'),
   startIncorrectReview: document.getElementById('start-incorrect-review'),
   startWeakestReview: document.getElementById('start-weakest-review'),
   startUnmasteredReview: document.getElementById('start-unmastered-review'),
@@ -350,6 +353,9 @@ function bindEvents() {
   }
   if (elements.a2VocabStopReading) {
     elements.a2VocabStopReading.addEventListener('click', stopWordListReading);
+  }
+  if (elements.b1VerbStopReading) {
+    elements.b1VerbStopReading.addEventListener('click', stopWordListReading);
   }
   if (elements.a2VocabList) {
     elements.a2VocabList.addEventListener('click', handleA2VocabListClick);
@@ -2930,7 +2936,9 @@ async function renderReviewItem() {
     elements.quizMastery.textContent = `${formatWordMasteryPercent(word)}%`;
     elements.sentenceNumber.textContent = `词语 ${currentReview.index + 1}`;
     elements.reviewSentenceDifficultyLabel.textContent = word.difficulty ? `难度：${word.difficulty}` : '难度：未设置';
-    elements.reviewSentenceTagsLabel.textContent = word.translation ? `中文：${word.translation}` : (word.examples?.length ? `例句：${word.examples[0]}` : '暂无中文说明');
+    elements.reviewSentenceTagsLabel.textContent = (word.tags && word.tags.length)
+      ? `标签：${word.tags.join('，')}`
+      : '标签：无';
     elements.dictationInput.value = '';
     elements.dictationInput.placeholder = '输入这个错词的荷兰语拼写，按 Enter 提交';
     updateDictationInputLabel('输入错词拼写');
@@ -2938,6 +2946,7 @@ async function renderReviewItem() {
     elements.submitAnswer.disabled = false;
     elements.nextSentence.classList.add('hidden');
     elements.nextSentence.disabled = true;
+    elements.showAnswer.textContent = '显示翻译';
     elements.showAnswer.classList.toggle('hidden', !word.translation && !(word.examples && word.examples.length));
     showFeedback('', '');
     clearReviewSummary();
@@ -2956,6 +2965,7 @@ async function renderReviewItem() {
   if (elements.reviewPanel) elements.reviewPanel.classList.remove('word-review-mode');
   if (elements.nextSentence) elements.nextSentence.classList.remove('hidden');
   if (elements.showAnswer) elements.showAnswer.classList.remove('hidden');
+  if (elements.showAnswer) elements.showAnswer.textContent = '显示正确文本';
   if (elements.submitAnswer) elements.submitAnswer.textContent = '提交答案';
   updateDictationInputLabel('输入你的听写结果');
   const article = findArticle(currentReview.articleId);
@@ -3014,8 +3024,8 @@ function revealSentenceAnswer() {
   if (currentReview.type === 'word') {
     const word = getWordDeckEntry(currentReview.wordIds[currentReview.index], currentReview.deck);
     if (!word) return;
-    const translationText = word.translation ? `\n中文：${word.translation}` : '';
-    showFeedback(`正确文本：${word.word}${translationText}`, 'info');
+    const translationText = word.translation || (word.examples?.length ? word.examples[0] : '');
+    showFeedback(translationText ? `中文：${translationText}` : '这个词还没有中文说明。', 'info');
     return;
   }
   const article = findArticle(currentReview.articleId);
@@ -5180,6 +5190,10 @@ function handleCustomVerbPanelClick(event, deck) {
     startWordReview(null, { deck, weakest: true, modeLabel: `复习最陌生 ${meta.title}` });
     return;
   }
+  if (action === 'read-unmastered') {
+    startWordListReading({ deck });
+    return;
+  }
 
   const card = event.target.closest('.wordbook-card');
   if (!card) return;
@@ -5230,6 +5244,8 @@ function renderCustomVerbDeckPage(deck) {
   panel.querySelector('[data-verb-action="review-all"]').disabled = entries.length === 0;
   panel.querySelector('[data-verb-action="review-unmastered"]').disabled = active.length === 0;
   panel.querySelector('[data-verb-action="review-weakest"]').disabled = active.length === 0;
+  const readButton = panel.querySelector('[data-verb-action="read-unmastered"]');
+  if (readButton) readButton.disabled = active.length === 0;
   list.innerHTML = `
     <section class="wordbook-group wordbook-group-active">
       <div class="wordbook-group-header">
@@ -5365,6 +5381,8 @@ function getUnmasteredWordsForReading() {
 function resetWordReadingPanel() {
   if (elements.wordbookReadingPanel) elements.wordbookReadingPanel.classList.add('hidden');
   if (elements.wordbookReadingList) elements.wordbookReadingList.innerHTML = '';
+  if (elements.b1VerbReadingPanel) elements.b1VerbReadingPanel.classList.add('hidden');
+  if (elements.b1VerbReadingList) elements.b1VerbReadingList.innerHTML = '';
 }
 
 function getReadingElements(deck = 'wordbook') {
@@ -5372,6 +5390,12 @@ function getReadingElements(deck = 'wordbook') {
     return {
       panel: elements.a2VocabReadingPanel,
       list: elements.a2VocabReadingList,
+    };
+  }
+  if (deck === 'b1verbs') {
+    return {
+      panel: elements.b1VerbReadingPanel,
+      list: elements.b1VerbReadingList,
     };
   }
   return {
@@ -5384,7 +5408,10 @@ function renderWordReadingList(words, mode = 'unmastered', deck = 'wordbook') {
   const reading = getReadingElements(deck);
   if (!reading.panel || !reading.list) return;
   const isA2Deck = deck === 'a2vocab';
-  const title = mode === 'mastered' ? '已掌握归档朗读' : (isA2Deck ? 'A2 未掌握词朗读' : '未掌握单词朗读');
+  const deckLabel = getWordDeckLabel(deck);
+  const title = mode === 'mastered'
+    ? '已掌握归档朗读'
+    : (isA2Deck || CUSTOM_VERB_DECK_META[deck] ? `${deckLabel} 未掌握动词朗读` : '未掌握单词朗读');
   const note = mode === 'mastered'
     ? '归档单词会自动朗读 2 遍，当前朗读的单词会高亮。'
     : '每个单词自动朗读 2 遍，当前朗读的单词会高亮。';
@@ -5443,8 +5470,13 @@ async function startWordListReading(options = {}) {
   }
   if (elements.wordbookReadUnmastered) elements.wordbookReadUnmastered.disabled = true;
   if (elements.a2VocabReadUnmastered) elements.a2VocabReadUnmastered.disabled = true;
+  if (elements.b1VerbPanel) {
+    const b1ReadButton = elements.b1VerbPanel.querySelector('[data-verb-action="read-unmastered"]');
+    if (b1ReadButton) b1ReadButton.disabled = true;
+  }
   if (elements.wordbookStopReading) elements.wordbookStopReading.disabled = false;
   if (elements.a2VocabStopReading) elements.a2VocabStopReading.disabled = false;
+  if (elements.b1VerbStopReading) elements.b1VerbStopReading.disabled = false;
 
   for (const word of words) {
     if (wordReadingState.stopRequested) break;
@@ -5489,8 +5521,13 @@ function finishWordListReading(options = {}) {
   if (elements.a2VocabReadUnmastered) {
     elements.a2VocabReadUnmastered.disabled = getWordsForReading('unmastered', 'a2vocab').length === 0;
   }
+  if (elements.b1VerbPanel) {
+    const b1ReadButton = elements.b1VerbPanel.querySelector('[data-verb-action="read-unmastered"]');
+    if (b1ReadButton) b1ReadButton.disabled = getWordsForReading('unmastered', 'b1verbs').length === 0;
+  }
   if (elements.wordbookStopReading) elements.wordbookStopReading.disabled = true;
   if (elements.a2VocabStopReading) elements.a2VocabStopReading.disabled = true;
+  if (elements.b1VerbStopReading) elements.b1VerbStopReading.disabled = true;
 }
 
 async function playWordEntryTwice(entry) {

@@ -380,6 +380,17 @@
         <button type="button" class="btn btn-primary" data-verb-action="review-all">全部复习</button>
         <button type="button" class="btn btn-secondary" data-verb-action="review-unmastered">只复习未掌握</button>
         <button type="button" class="btn btn-secondary" data-verb-action="review-weakest">复习最陌生</button>
+        <button type="button" class="btn btn-secondary" data-verb-action="read-unmastered">列表播放未掌握动词</button>
+      </div>
+      <div id="b1-verb-reading-panel" class="wordbook-reading-panel hidden">
+        <div class="wordbook-reading-header">
+          <div>
+            <h3>B1 未掌握动词朗读</h3>
+            <p>每个动词自动朗读 2 遍，当前朗读的动词会高亮。</p>
+          </div>
+          <button id="b1-verb-stop-reading" type="button" class="btn btn-small btn-secondary">结束阅读</button>
+        </div>
+        <div id="b1-verb-reading-list" class="wordbook-reading-list"></div>
       </div>
       <div class="report-section">
         <div class="report-section-header">
@@ -542,6 +553,6 @@
     </div>
   </template>
 
-  <script src="app.js?v=20260624-backup-v12"></script>
+  <script src="app.js?v=20260627-b1-reading-translation"></script>
 </body>
 </html>
