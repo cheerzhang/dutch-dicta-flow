@@ -5,8 +5,8 @@ const A2_VOCAB_PROGRESS_KEY = 'dutchDictaA2VocabProgress';
 const CUSTOM_VERB_DECKS_KEY = 'dutchDictaCustomVerbDecks';
 const DB_NAME = 'dutchDictaAudioDB';
 const DB_STORE = 'audioFiles';
-const BACKUP_VERSION = 12;
-const REPORT_SCHEMA_VERSION = 7;
+const BACKUP_VERSION = 13;
+const REPORT_SCHEMA_VERSION = 8;
 const A2_VOCAB_SCHEMA_VERSION = 1;
 const A2_DEFAULT_REVIEW_COUNT = 20;
 const CUSTOM_VERB_DECK_META = {
@@ -1656,9 +1656,11 @@ function getAudioUrl(audioId) {
       .filter(session => session && (session.articleId || session.articleTitle));
   }
 
-  function getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions) {
+  function getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions, normalizedCustomVerbDecks) {
     const wordBookReviewSessions = getWordBookReviewSessions(normalizedWordReviewSessions);
     const a2ReviewSessions = normalizeWordReviewSessions(normalizedWordReviewSessions).filter(session => session.deck === 'a2vocab');
+    const b1ReviewSessions = normalizeWordReviewSessions(normalizedWordReviewSessions).filter(session => session.deck === 'b1verbs');
+    const b2ReviewSessions = normalizeWordReviewSessions(normalizedWordReviewSessions).filter(session => session.deck === 'b2verbs');
     const a2VocabEntries = getA2VocabEntries();
     const now = new Date();
     const oneDayMs = 24 * 60 * 60 * 1000;
@@ -1703,9 +1705,13 @@ function getAudioUrl(audioId) {
       type: 'a2vocab',
       title: 'A2 动词复习',
     }));
-    const timedStudySessions = [...articleReviewSessions, ...recitationSessions, ...wordSessions, ...a2Sessions];
+    const b1Sessions = b1ReviewSessions.map(session => ({ ...session, type: 'b1verbs', title: 'B1 动词复习' }));
+    const b2Sessions = b2ReviewSessions.map(session => ({ ...session, type: 'b2verbs', title: 'B2 动词复习' }));
+    const timedStudySessions = [...articleReviewSessions, ...recitationSessions, ...wordSessions, ...a2Sessions, ...b1Sessions, ...b2Sessions];
     const totalDuration = timedStudySessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
     const a2Duration = a2Sessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+    const b1Duration = b1Sessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
+    const b2Duration = b2Sessions.reduce((sum, session) => sum + toNumber(session.duration, 0), 0);
     const sessionsLast7 = timedStudySessions.filter(session => {
       const date = new Date(session.timestamp);
       return !Number.isNaN(date.getTime()) && (now - date) <= 7 * oneDayMs;
@@ -1829,6 +1835,33 @@ function getAudioUrl(audioId) {
       map[key] = (map[key] || 0) + 1;
       return map;
     }, {});
+    const getCustomVerbSnapshot = (deck, sessions, duration) => {
+      const entries = normalizedCustomVerbDecks?.[deck] || [];
+      const masteredWords = entries.filter(isWordEntryMastered).length;
+      return {
+        totalWords: entries.length,
+        reviewedWords: entries.filter(item => toNumber(item.reviewCount, 0) > 0 || (Array.isArray(item.history) && item.history.length)).length,
+        masteredWords,
+        pendingWords: Math.max(0, entries.length - masteredWords),
+        averageMastery: entries.length
+          ? Math.round(entries.reduce((sum, item) => sum + toNumber(item.masteryScore, 0), 0) / entries.length)
+          : 0,
+        audioCount: entries.filter(item => item.audioId).length,
+        totalReviews: entries.reduce((sum, item) => sum + toNumber(item.reviewCount, 0), 0),
+        reviewSessionCount: sessions.length,
+        duration,
+        masteryStats: getWordBookMasteryStats(entries),
+        weakestWords: entries.slice().sort(compareWordUnfamiliarity).slice(0, 10).map(item => ({
+          id: item.id,
+          word: item.word,
+          translation: item.translation,
+          reviewCount: toNumber(item.reviewCount, 0),
+          masteryScore: formatWordMasteryPercent(item),
+        })),
+      };
+    };
+    const b1Vocabulary = getCustomVerbSnapshot('b1verbs', b1ReviewSessions, b1Duration);
+    const b2Vocabulary = getCustomVerbSnapshot('b2verbs', b2ReviewSessions, b2Duration);
 
     const dailyStudyLast30 = [];
     for (let i = 29; i >= 0; i -= 1) {
@@ -2006,12 +2039,14 @@ function getAudioUrl(audioId) {
 
     const reviewedUnits = Math.max(1, sentenceHistory.length
       + wordBookReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0)
-      + a2ReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
+      + a2ReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0)
+      + b1ReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0)
+      + b2ReviewSessions.reduce((sum, session) => sum + toNumber(session.reviewedCount, 0), 0));
     const avgMsPerUnit = Math.min(180000, Math.max(20000, Math.round(totalDuration / reviewedUnits) || 60000));
     const avgDailyMs7 = Math.round(study7Ms / 7);
     const avgActiveDayMs7 = activeDays7 ? Math.round(study7Ms / activeDays7) : 0;
     const recitationNeedsPractice = recitationArticleStats.filter(item => item.averageScore < 90).length;
-    const remainingUnits = pendingSentences + activeMistakeWords + a2PendingWords + recitationNeedsPractice;
+    const remainingUnits = pendingSentences + activeMistakeWords + a2PendingWords + b1Vocabulary.pendingWords + b2Vocabulary.pendingWords + recitationNeedsPractice;
     const estimatedRemainingMs = remainingUnits * avgMsPerUnit * 2;
     const estimateBasisMs = avgDailyMs7 || (totalDuration ? Math.round(totalDuration / Math.max(activeDays30, 1)) : 0);
     const estimatedDays = remainingUnits === 0 ? 0 : estimateBasisMs ? Math.max(1, Math.ceil(estimatedRemainingMs / estimateBasisMs)) : null;
@@ -2032,12 +2067,16 @@ function getAudioUrl(audioId) {
         'articles.recitationSessions',
         'wordReviewSessions',
         'a2VocabProgress',
+        'customVerbDecks.b1verbs',
+        'customVerbDecks.b2verbs',
       ],
       inventory: {
         articles: normalizedArticles.length,
         sentences: totalSentences,
         mistakeWords: totalMistakeWords,
         a2Words: a2VocabEntries.length,
+        b1Words: b1Vocabulary.totalWords,
+        b2Words: b2Vocabulary.totalWords,
         recitedArticles: recitationArticleStats.length,
       },
       mastery: {
@@ -2057,6 +2096,8 @@ function getAudioUrl(audioId) {
         last30Duration: study30Ms,
         totalDuration,
         a2Duration,
+        b1Duration,
+        b2Duration,
         last7Quality: qualityLast7,
         activeDaysLast30: activeDays30,
         currentStreak,
@@ -2068,6 +2109,8 @@ function getAudioUrl(audioId) {
         pendingSentences,
         activeMistakeWords,
         a2PendingWords,
+        b1PendingWords: b1Vocabulary.pendingWords,
+        b2PendingWords: b2Vocabulary.pendingWords,
         recitationNeedsPractice,
         estimatedRemainingDuration: estimatedRemainingMs,
         estimateBasisDurationPerDay: estimateBasisMs,
@@ -2101,6 +2144,8 @@ function getAudioUrl(audioId) {
         modeCounts: a2ModeCounts,
         masteryStats: a2MasteryStats,
       },
+      b1Vocabulary,
+      b2Vocabulary,
       dashboardActions: [
         {
           page: 'list',
@@ -2124,11 +2169,25 @@ function getAudioUrl(audioId) {
           primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords > 0,
         },
         {
+          page: 'b1verbs',
+          label: '练 B1 动词',
+          value: b1Vocabulary.pendingWords,
+          unit: '未完全掌握',
+          primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords === 0 && b1Vocabulary.pendingWords > 0,
+        },
+        {
+          page: 'b2verbs',
+          label: '练 B2 动词',
+          value: b2Vocabulary.pendingWords,
+          unit: '未完全掌握',
+          primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords === 0 && b1Vocabulary.pendingWords === 0 && b2Vocabulary.pendingWords > 0,
+        },
+        {
           page: 'recite',
           label: '全文默写',
           value: recitationNeedsPractice,
           unit: '待稳定文章',
-          primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords === 0,
+          primary: pendingSentences === 0 && activeMistakeWords === 0 && a2PendingWords === 0 && b1Vocabulary.pendingWords === 0 && b2Vocabulary.pendingWords === 0,
         },
       ],
       charts: {
@@ -2142,6 +2201,8 @@ function getAudioUrl(audioId) {
           sentenceCount: item.sentenceCount,
         })),
         a2MasteryBuckets: a2MasteryStats.buckets,
+        b1MasteryBuckets: b1Vocabulary.masteryStats.buckets,
+        b2MasteryBuckets: b2Vocabulary.masteryStats.buckets,
       },
       calendars: {
         currentYear: calendarYear,
@@ -2159,6 +2220,8 @@ function getAudioUrl(audioId) {
         recitationByArticle: recitationArticleStats,
         mostReviewedUnmasteredWords,
         a2WeakestWords,
+        b1WeakestWords: b1Vocabulary.weakestWords,
+        b2WeakestWords: b2Vocabulary.weakestWords,
       },
       counts: {
         articles: normalizedArticles.length,
@@ -2167,7 +2230,11 @@ function getAudioUrl(audioId) {
         recitationSessions: portableRecitationSessions.length,
         wordReviewSessions: wordBookReviewSessions.length,
         a2ReviewSessions: a2ReviewSessions.length,
+        b1ReviewSessions: b1ReviewSessions.length,
+        b2ReviewSessions: b2ReviewSessions.length,
         a2Words: a2VocabEntries.length,
+        b1Words: b1Vocabulary.totalWords,
+        b2Words: b2Vocabulary.totalWords,
       },
     };
   }
@@ -2277,7 +2344,7 @@ function getAudioUrl(audioId) {
       a2VocabularyMasteryStats: getWordBookMasteryStats(a2VocabEntriesWithProgress),
       a2VocabProgress: normalizedA2VocabProgress,
       recitationSessions: portableRecitationSessions,
-      reportData: getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions),
+      reportData: getReportDataSnapshot(normalizedArticles, normalizedWordBook, normalizedWordReviewSessions, portableRecitationSessions, normalizedCustomVerbDecks),
       audioFiles: Array.isArray(options.audioFiles) ? options.audioFiles : [],
       exportedAt: new Date().toISOString(),
     }, options.packageType ? { packageType: options.packageType } : {});
@@ -2309,9 +2376,11 @@ function getAudioUrl(audioId) {
         audioFiles,
       });
       const a2SessionCount = payload.wordReviewSessions.filter(session => session.deck === 'a2vocab').length;
+      const b1SessionCount = payload.wordReviewSessions.filter(session => session.deck === 'b1verbs').length;
+      const b2SessionCount = payload.wordReviewSessions.filter(session => session.deck === 'b2verbs').length;
       const customVerbCount = (payload.customVerbDecks.b1verbs?.length || 0) + (payload.customVerbDecks.b2verbs?.length || 0);
       downloadJson(payload, `dutch-dicta-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
-      elements.backupStatus.textContent = `备份已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录（含 ${a2SessionCount} 条A2记录）、${payload.a2Vocabulary.total} 个A2动词和 ${customVerbCount} 个B1/B2自建动词。`;
+      elements.backupStatus.textContent = `备份已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录（A2 ${a2SessionCount} 条、B1 ${b1SessionCount} 条、B2 ${b2SessionCount} 条）、${payload.a2Vocabulary.total} 个A2动词和 ${customVerbCount} 个B1/B2自建动词，以及完整报告快照。`;
     } catch (error) {
       elements.backupStatus.textContent = `备份失败：${error.message}`;
     }
@@ -2335,6 +2404,8 @@ function getAudioUrl(audioId) {
         audioFiles,
       });
       const a2SessionCount = payload.wordReviewSessions.filter(session => session.deck === 'a2vocab').length;
+      const b1SessionCount = payload.wordReviewSessions.filter(session => session.deck === 'b1verbs').length;
+      const b2SessionCount = payload.wordReviewSessions.filter(session => session.deck === 'b2verbs').length;
       const customVerbCount = (payload.customVerbDecks.b1verbs?.length || 0) + (payload.customVerbDecks.b2verbs?.length || 0);
       const files = [
         {
@@ -2348,7 +2419,7 @@ function getAudioUrl(audioId) {
       }
       const zipBlob = createZipBlob(files);
       downloadBlob(zipBlob, `dutch-dicta-complete-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`);
-      elements.backupStatus.textContent = `完整备份 ZIP 已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录（含 ${a2SessionCount} 条A2记录）、${customVerbCount} 个B1/B2自建动词、${audioFiles.length} 个音频文件。`;
+      elements.backupStatus.textContent = `完整备份 ZIP 已生成：包含 ${payload.articles.length} 篇文章、${payload.recitationSessions.length} 条全文默写记录、${payload.wordReviewSessions.length} 条单词复习记录（A2 ${a2SessionCount} 条、B1 ${b1SessionCount} 条、B2 ${b2SessionCount} 条）、${customVerbCount} 个B1/B2自建动词、完整报告快照和 ${audioFiles.length} 个音频文件。`;
     } catch (error) {
       elements.backupStatus.textContent = `完整备份失败：${error.message}`;
     }
