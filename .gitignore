@@ -1,5 +1,6 @@
 # Ignore local audio files and temporary media
 /audio/
+.DS_Store
 *.mp3
 *.wav
 *.ogg
